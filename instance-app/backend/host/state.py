@@ -68,7 +68,8 @@ def build_state(
     storage.ensure_roots()
 
     store = store or LocalStore(config.business_db_path)
-    plugins = plugins or build_registry(config.enabled_plugins)
+    plugins = build_registry(config.enabled_plugins) if plugins is None else plugins
+    plugins.freeze()
 
     session_db = config.session_db_path()
     if sessions is None:

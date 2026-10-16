@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from .explanation import ExplanationWorkflow
-from .narration import NarrationWorkflow
+from backend.plugins.explanations import ExplanationWorkflow
+from backend.plugins.knowledge_narration import NarrationWorkflow, RetellingWorkflow
 
-__all__ = ["ExplanationWorkflow", "NarrationWorkflow"]
+__all__ = ['ExplanationWorkflow', 'NarrationWorkflow', 'RetellingWorkflow']

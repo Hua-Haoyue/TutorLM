@@ -61,6 +61,9 @@ from .local.store import (
 )
 from .plugins import PluginRegistry
 from .runs import CancelledRun, RunContext, RunDraft, RunManager, WORKLOAD_EXTRACT
+from backend.plugin_contracts import Draft
+from backend.plugin_contracts.validation import bounded_json
+from backend.domain.models import Explanation, Narration
 #: Identity used by a local/demo instance that has no injected workspace UUID.
 #: It is a server-side constant, never taken from a request.
 LOCAL_WORKSPACE_ID = "local"
@@ -203,6 +206,7 @@ class AppServices:
         self.runs = runs
         self.plugins = plugins
         self.provider = provider or FakeProvider(config.provider.model)
+        self.runs.draft_committer = self.commit_draft
         self._register_handlers()
 
     # -- identity --------------------------------------------------------
@@ -303,7 +307,8 @@ class AppServices:
         }
 
     def explanation_public(self, row: Mapping[str, Any]) -> dict[str, Any]:
-        return {
+        result = {
+            'id': row['id'],
             "node_id": row["node_id"],
             "question": row.get("question"),
             "answer": row["answer"],
@@ -311,6 +316,10 @@ class AppServices:
             "model": row["model"],
             "created_at": _rows_to_iso(row.get("created_at")),
         }
+        learning = _json_or(row.get('learning_json'), {})
+        if learning:
+            result['learning'] = learning
+        return result
 
     def narration_public(self, row: Mapping[str, Any]) -> dict[str, Any]:
         segments = _json_or(row.get("segments"), [])
@@ -1115,12 +1124,14 @@ class AppServices:
         idempotency_key: str | None,
         session_id: str,
     ) -> dict[str, Any]:
-        """Queue an explanation/narration run for the workspace-bound project."""
-        workflow = self.plugins.workflow(kind)
-        if workflow is None:
+        """Queue a registered plugin workflow for the workspace-bound project."""
+        if not self.plugins.supports(kind):
             raise app_errors.WorkflowDisabled(f"Workflow {kind!r} is not enabled in this instance")
+        workflow = self.plugins.workflow(kind)
         project = self.current_project()
         payload = dict(input_payload)
+        if kind == 'narration' and not payload.get('project_id'):
+            payload['project_id'] = project['id']
         # Idempotency scope is the workspace identity, not the session: the same
         # key from a fresh session must still be idempotent for this project.
         scope = f"workspace:{self.workspace_id}"
@@ -1187,69 +1198,60 @@ class AppServices:
 
     # -- run handlers ------------------------------------------------------
     def _register_handlers(self) -> None:
-        self.runs.register("explanation", self._handle_explanation)
-        self.runs.register("narration", self._handle_narration)
+        for kind in self.plugins.executable_kinds():
+            self.runs.register(kind, self._handle_plugin)
         self.runs.register("extract", self._handle_extract)
 
-    def _handle_explanation(self, ctx: RunContext) -> Mapping[str, Any]:
-        node_id = str(ctx.payload.get("node_id") or "")
-        question = ctx.payload.get("question")
-        node = self.store.get_node(node_id)
-        if node is None:
-            raise app_errors.NodeNotFound()
-        if ctx.project_id and node["project_id"] != ctx.project_id:
-            raise app_errors.NodeNotFound()
+    def _handle_plugin(self, ctx: RunContext) -> Draft:
+        from .context import ScopedContext
+        entry = self.plugins.workflow(ctx.kind)
+        manifest = self.plugins.get(entry.plugin_id).manifest
+        context = ScopedContext(self, ctx, manifest)
+        draft = self.plugins.execute(ctx.kind, context, ctx.payload)
+        plugin_check = draft.precommit
+        def precommit():
+            context.precommit()
+            if plugin_check:
+                plugin_check()
+        draft.precommit = precommit
+        return draft
 
-        # Provider call happens with no transaction held (docs section 4.3).
-        result = self.provider.explain(
-            node_title=str(node["title"]),
-            quote=_quote_of(node),
-            question=str(question) if question else None,
-        )
-        if self.runs.is_cancelled(ctx.run_id):
+    def commit_draft(self, ctx: RunContext, draft: Draft) -> Mapping[str, Any]:
+        """Validate and publish a plugin result inside the Host transaction."""
+        manifest = self.plugins.get(self.plugins.workflow(ctx.kind).plugin_id).manifest
+        if draft.entity is not None and 'knowledge.write' not in manifest.capabilities:
+            raise app_errors.Forbidden('Plugin has no permission to publish knowledge')
+        if draft.precommit:
+            draft.precommit()
+        if ctx.session_id and not self.runs.session_valid(ctx.session_id):
             raise CancelledRun()
-
-        def publish():
+        result = bounded_json(dict(draft.result))
+        entity = draft.entity
+        if entity is None:
+            return result
+        project = self.require_project(entity.project_id)
+        bounded_json(entity.to_dict())
+        if isinstance(entity, Explanation) and draft.artifact_type == 'explanation':
+            if self.require_node(entity.node_id)['project_id'] != project['id']:
+                raise app_errors.NodeNotFound()
             record = self.store.add_explanation(
-                project_id=node['project_id'], node_id=node_id,
-                question=str(question) if question else None, answer=result.text,
-                provider=result.provider, model=result.model,
+                project_id=entity.project_id, node_id=entity.node_id, question=entity.question,
+                answer=entity.answer, provider=entity.provider, model=entity.model,
+                entity_id=entity.id, learning=entity.learning,
             )
-            return {'explanation': self.explanation_public(record)}
-        return RunDraft(publish)
-
-    def _handle_narration(self, ctx: RunContext) -> Mapping[str, Any]:
-        node_ids = [str(value) for value in (ctx.payload.get("node_ids") or [])]
-        limit = self.config.limits.max_narration_nodes
-        if not node_ids:
-            raise app_errors.Unprocessable("node_ids must not be empty", code="invalid_run_input")
-        if len(node_ids) > limit:
-            raise app_errors.Unprocessable(
-                f"node_ids is limited to {limit} entries", code="invalid_run_input"
-            )
-        project = self.current_project()
-        nodes: list[dict[str, Any]] = []
-        for node_id in node_ids:
-            node = self.store.get_node(node_id)
-            if node is None or node["project_id"] != project["id"]:
-                raise app_errors.NodeNotFound(f"Node {node_id} not found in this project")
-            nodes.append(node)
-
-        segments = self.provider.narrate(
-            title=str(ctx.payload.get("title") or ""),
-            nodes=nodes,
-        )
-        if self.runs.is_cancelled(ctx.run_id):
-            raise CancelledRun()
-
-        title = str(ctx.payload.get("title") or "").strip() or f"串讲 · {len(segments)} 段"
-        def publish():
+            saved = self.explanation_public(record)
+            return {**result, 'explanation': saved} if 'explanation' in result else {'explanation': saved}
+        if isinstance(entity, Narration) and draft.artifact_type == 'narration':
+            for segment in entity.segments:
+                if self.require_node(segment.node_id)['project_id'] != project['id']:
+                    raise app_errors.NodeNotFound()
             record = self.store.add_narration(
-                project_id=project['id'], title=title, segments=segments,
-                provider=self.provider.name, model=self.provider.model,
+                project_id=entity.project_id, title=entity.title,
+                segments=[s.to_dict() for s in entity.segments], provider=entity.provider,
+                model=entity.model, entity_id=entity.id,
             )
             return {'narration': self.narration_public(record)}
-        return RunDraft(publish)
+        raise app_errors.Unprocessable('Unsupported workflow draft entity', code='invalid_draft')
 
     def _handle_extract(self, ctx: RunContext) -> Mapping[str, Any]:
         """Extract structured text via the format adapters (registry port).
@@ -1503,17 +1505,6 @@ def _search_anchor(
     if len(matches) != 1:
         return None
     return matches[0]
-
-
-def _quote_of(node: Mapping[str, Any]) -> str | None:
-    """Read the anchored quote from ``node.metadata.source`` (unified SourceRef)."""
-    metadata = _json_or(node.get("metadata_json"), {})
-    source = metadata.get("source") if isinstance(metadata, dict) else None
-    if isinstance(source, dict):
-        quote = source.get("quote")
-        if isinstance(quote, str) and quote.strip():
-            return quote
-    return None
 
 
 def _etag(content_digest: str) -> str:

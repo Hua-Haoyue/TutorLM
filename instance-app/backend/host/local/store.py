@@ -21,6 +21,7 @@ import re
 import shutil
 import sqlite3
 import threading
+from contextlib import contextmanager
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -194,6 +195,24 @@ CREATE TABLE IF NOT EXISTS document_builds (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_builds_revision ON document_builds(revision_id, created_at);
+
+CREATE TABLE IF NOT EXISTS learner_profiles (
+  project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  profile_json TEXT NOT NULL,
+  revision INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS node_learning (
+  node_id TEXT PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
+  state_json TEXT NOT NULL,
+  revision INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS run_events (
+  run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL,
+  event_type TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  PRIMARY KEY (run_id, seq)
+);
 """
 
 RUN_STATES = ("queued", "running", "completed", "failed", "cancelled", "interrupted")
@@ -252,6 +271,21 @@ def sanitize_filename(value: str | None, fallback: str = "main") -> str:
 def content_hash(payload: bytes) -> str:
     return "sha256:" + hashlib.sha256(payload).hexdigest()
 
+class _TransactionConnection:
+    """Nested repository operations borrow the outer Unit of Work connection."""
+
+    def __init__(self, connection):
+        self.connection = connection
+
+    def execute(self, sql, parameters=()):
+        if sql.strip().split()[0].upper() in {'BEGIN', 'COMMIT', 'ROLLBACK'}:
+            return self.connection.execute('SELECT 1')
+        return self.connection.execute(sql, parameters)
+
+    def close(self):
+        pass
+
+
 class LocalStore:
     """SQLite-backed repository bundle used until domain/infrastructure land.
 
@@ -264,10 +298,14 @@ class LocalStore:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._ddl_lock = threading.Lock()
+        self.lock = threading.RLock()
+        self._local = threading.local()
         self._initialize()
 
     # -- infrastructure --------------------------------------------------
     def _connect(self) -> sqlite3.Connection:
+        if getattr(self._local, 'connection', None) is not None:
+            return _TransactionConnection(self._local.connection)
         conn = sqlite3.connect(str(self.db_path), timeout=15.0, isolation_level=None)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys=ON")
@@ -278,11 +316,33 @@ class LocalStore:
             conn = self._connect()
             try:
                 conn.executescript(SCHEMA)
+                columns = {r['name'] for r in conn.execute('PRAGMA table_info(explanations)')}
+                if 'learning_json' not in columns:
+                    conn.execute("ALTER TABLE explanations ADD COLUMN learning_json TEXT NOT NULL DEFAULT '{}'")
             finally:
                 conn.close()
 
     def close(self) -> None:
         return None
+
+    @contextmanager
+    def transaction(self):
+        with self.lock:
+            if getattr(self._local, 'connection', None) is not None:
+                yield self._local.connection
+                return
+            conn = self._connect()
+            conn.execute('BEGIN IMMEDIATE')
+            self._local.connection = conn
+            try:
+                yield conn
+                conn.execute('COMMIT')
+            except BaseException:
+                conn.execute('ROLLBACK')
+                raise
+            finally:
+                self._local.connection = None
+                conn.close()
 
     @staticmethod
     def _rows(cur: sqlite3.Cursor) -> list[dict[str, Any]]:
@@ -465,6 +525,7 @@ class LocalStore:
             conn.execute("DELETE FROM narrations WHERE project_id = ?", (project_id,))
             conn.execute("DELETE FROM documents WHERE project_id = ?", (project_id,))
             conn.execute("DELETE FROM runs WHERE project_id = ?", (project_id,))
+            conn.execute("DELETE FROM learner_profiles WHERE project_id = ?", (project_id,))
             conn.execute("COMMIT")
         except sqlite3.Error:
             conn.execute("ROLLBACK")
@@ -910,7 +971,7 @@ class LocalStore:
         conn = self._connect()
         try:
             cur = conn.execute(
-                "SELECT * FROM explanations WHERE project_id = ? ORDER BY created_at DESC LIMIT 500",
+                "SELECT * FROM explanations WHERE project_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 500",
                 (project_id,),
             )
             return self._rows(cur)
@@ -926,9 +987,11 @@ class LocalStore:
         answer: str,
         provider: str,
         model: str,
+        entity_id: str | None = None,
+        learning: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         record = {
-            "id": new_id(),
+            "id": entity_id or new_id(),
             "project_id": project_id,
             "node_id": node_id,
             "question": question,
@@ -954,6 +1017,10 @@ class LocalStore:
                     record["created_at"],
                 ),
             )
+            if learning:
+                conn.execute('UPDATE explanations SET learning_json=? WHERE id=?',
+                             (json.dumps(dict(learning), allow_nan=False), record['id']))
+                record['learning_json'] = json.dumps(dict(learning))
             conn.execute("COMMIT")
         except sqlite3.Error:
             conn.execute("ROLLBACK")
@@ -980,11 +1047,12 @@ class LocalStore:
         segments: Sequence[Mapping[str, Any]],
         provider: str,
         model: str,
+        entity_id: str | None = None,
     ) -> dict[str, Any]:
         """`segment_count`/`total_duration_seconds` are derived server-side."""
         total = sum(float(seg.get("duration_seconds") or 0) for seg in segments)
         record = {
-            "id": new_id(),
+            "id": entity_id or new_id(),
             "project_id": project_id,
             "title": title,
             "segment_count": len(segments),

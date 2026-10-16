@@ -23,11 +23,13 @@ from __future__ import annotations
 import json
 import queue
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Protocol
 
 from .errors import AppError, IdempotencyConflict, NotFound, RunQueueFull
+from backend.plugin_contracts import Draft
+from backend.domain.errors import DomainError
 
 WORKLOAD_MODEL = "model"
 WORKLOAD_EXTRACT = "extract"
@@ -62,7 +64,7 @@ class RunContext:
 
 
 class RunHandler(Protocol):
-    def __call__(self, ctx: RunContext) -> Mapping[str, Any]:
+    def __call__(self, ctx: RunContext) -> Mapping[str, Any] | Draft | RunDraft:
         """Return the result payload to commit, or raise `AppError`."""
 
 
@@ -138,6 +140,7 @@ class RunManager:
         self._handlers: dict[str, RunHandler] = {}
         self._lock = threading.RLock()
         self.session_valid: Callable[[str], bool] = lambda _: True
+        self.draft_committer = None
         config = executors or {
             WORKLOAD_MODEL: (2, 32),
             WORKLOAD_EXTRACT: (1, 8),
@@ -287,6 +290,9 @@ class RunManager:
         except AppError as exc:
             self._fail(run_id, exc)
             return
+        except DomainError as exc:
+            self._fail(run_id, AppError(str(exc), code=exc.code))
+            return
         except Exception as exc:  # pragma: no cover - defensive
             self._fail(run_id, AppError("Run failed", code="run_failed", details={"reason": type(exc).__name__}))
             return
@@ -300,15 +306,27 @@ class RunManager:
                 self._cancel(run_id)
                 return
             try:
-                if isinstance(result, RunDraft):
-                    result = result.publish()
-                self.store.mark_run_state(
-                    run_id, 'completed', progress=100,
-                    result_json=json.dumps(dict(result), ensure_ascii=False),
-                    error_code=None, error_message=None,
-                )
+                transaction = getattr(self.store, 'transaction', nullcontext)
+                with transaction():
+                    if ctx.session_id and not self.session_valid(ctx.session_id):
+                        raise CancelledRun()
+                    if isinstance(result, Draft):
+                        if self.draft_committer is None:
+                            raise AppError('Draft committer is not configured')
+                        result = self.draft_committer(ctx, result)
+                    elif isinstance(result, RunDraft):
+                        result = result.publish()
+                    self.store.mark_run_state(
+                        run_id, 'completed', progress=100,
+                        result_json=json.dumps(dict(result), ensure_ascii=False),
+                        error_code=None, error_message=None,
+                    )
             except AppError as exc:
                 self._fail(run_id, exc)
+            except CancelledRun:
+                self._cancel(run_id)
+            except DomainError as exc:
+                self._fail(run_id, AppError(str(exc), code=exc.code))
             except Exception:
                 self._fail(run_id, AppError('Run publication failed', code='run_failed'))
 

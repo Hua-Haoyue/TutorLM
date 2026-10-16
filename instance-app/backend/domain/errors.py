@@ -157,6 +157,16 @@ class ProviderUnavailable(DomainError):
     http_status = 503
 
 
+class InvalidInputError(DomainError):
+    code = 'invalid_input'
+    http_status = 422
+
+
+NotFoundError = NotFound
+ConflictError = Conflict
+ProviderError = ProviderUnavailable
+
+
 class TexCompileUnavailable(DomainError):
     """本仓库无安全编译执行器：默认不可用，不降级到不安全路径。"""
 

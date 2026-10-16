@@ -20,4 +20,9 @@ def runtime(state: AppState = Depends(get_state)) -> dict:
     return state.services.runtime_public()
 
 
+@router.get('/plugins')
+def plugins(state: AppState = Depends(get_state)) -> dict:
+    return {'items': state.plugins.descriptors(), **state.plugins.summary()}
+
+
 __all__ = ["router"]

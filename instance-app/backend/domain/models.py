@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import json
+import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -339,9 +341,17 @@ class Explanation:
     model: str
     created_at: float
     question: str | None = None
+    learning: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def create(cls, *, project_id, node_id, question, answer, provider, model):
+        return cls(id=str(uuid.uuid4()), project_id=project_id, node_id=node_id,
+                   question=question, answer=answer, provider=provider, model=model, created_at=time.time())
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
+            'id': self.id,
+            'project_id': self.project_id,
             "node_id": self.node_id,
             "answer": self.answer,
             "provider": self.provider,
@@ -350,6 +360,8 @@ class Explanation:
         }
         if self.question is not None:
             payload["question"] = self.question
+        if self.learning:
+            payload['learning'] = dict(self.learning)
         return payload
 
 
@@ -385,6 +397,11 @@ class Narration:
     model: str
     created_at: float
     segments: list[NarrationSegment] = field(default_factory=list)
+
+    @classmethod
+    def create(cls, *, project_id, title, segments, provider, model):
+        return cls(id=str(uuid.uuid4()), project_id=project_id, title=title, segments=list(segments),
+                   provider=provider, model=model, created_at=time.time())
 
     @property
     def segment_count(self) -> int:

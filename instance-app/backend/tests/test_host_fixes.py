@@ -10,8 +10,9 @@ from backend.adapters.http.app import create_app
 from backend.host.binding import _binding_timestamp
 from backend.domain.errors import ConfigInvalid
 from backend.host.config import HostConfig
-from backend.host.errors import ServiceUnavailable
-from backend.host.local.provider import FakeProvider, ModelProviderAdapter
+from backend.domain.errors import ProviderError
+from backend.host.local.provider import FakeProvider, OpenAIProvider
+from backend.application.ports.model_provider import NarrationRequest
 from backend.application.ports.provider import GenerateResult, ProviderInfo
 
 
@@ -35,22 +36,23 @@ def test_remote_narration_validates_node_identity_and_duration():
             return GenerateResult(json.dumps(self.payload), self.info.name, self.info.model)
 
     provider = Provider()
-    adapter = ModelProviderAdapter(provider, max_tokens=100, timeout_seconds=1)
-    nodes = [{'id': 'node-1', 'title': 'Title'}]
-    assert adapter.narrate(title='Narration', nodes=nodes)[0]['node_id'] == 'node-1'
+    from backend.domain.models import Node
+    implementation = OpenAIProvider(provider, max_tokens=100, timeout_seconds=1)
+    nodes = [Node(id='node-1', project_id='p', document_id='d', title='Title', kind='concept', revision=1, created_at=0, updated_at=0)]
+    assert implementation.narrate(NarrationRequest('Narration', nodes)) == ['A segment']
     provider.payload['segments'][0]['node_id'] = 'foreign-node'
-    with pytest.raises(ServiceUnavailable):
-        adapter.narrate(title='Narration', nodes=nodes)
+    with pytest.raises(ProviderError):
+        implementation.narrate(NarrationRequest('Narration', nodes))
 
 
 def test_revoked_session_cannot_publish_a_late_model_result(env):
     entered, release = threading.Event(), threading.Event()
 
     class Provider(FakeProvider):
-        def explain(self, **kwargs):
+        def explain(self, request):
             entered.set()
             assert release.wait(5)
-            return super().explain(**kwargs)
+            return super().explain(request)
 
     app = create_app(HostConfig.from_env(env), provider=Provider())
     with TestClient(app) as client:

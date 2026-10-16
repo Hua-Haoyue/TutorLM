@@ -540,9 +540,9 @@ def _gated_client(env, gate):
     from fastapi.testclient import TestClient
 
     class GatedProvider(FakeProvider):
-        def explain(self, *, node_title, quote, question):
+        def explain(self, request):
             gate.wait(timeout=10)
-            return super().explain(node_title=node_title, quote=quote, question=question)
+            return super().explain(request)
 
     config = HostConfig.from_env(env)
     return TestClient(create_app(config, provider=GatedProvider(config.provider.model)))
@@ -658,7 +658,7 @@ def test_narration_rejects_too_many_nodes(client, session_headers, project_id, t
     assert created.status_code == 202
     finished = wait_for_run(created.json()["id"])
     assert finished["state"] == "failed"
-    assert finished["error"]["code"] in ("invalid_run_input", "run_failed")
+    assert finished['error']['code'] == 'invalid_input'
 
 
 def test_run_listing_and_unknown_run(client, session_headers):

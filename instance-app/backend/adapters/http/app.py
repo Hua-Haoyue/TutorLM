@@ -13,7 +13,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import asyncio
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, APIRouter, Depends
 from fastapi.responses import JSONResponse, Response
 
 from backend.host import errors as app_errors
@@ -21,7 +21,9 @@ from backend.host.config import HostConfig
 from backend.host.state import AppState, build_state
 
 from .errors import error_response, install_error_handlers
-from .routers import documents, graph, health, projects, runs, runtime, sessions, sources
+from .routers import documents, graph, health, learning, projects, runs, runtime, sessions, sources
+from .dependencies import require_session
+from backend.host.context import PluginHostContext
 
 #: Sent on every response: the app is same-origin behind the gateway and must not
 #: be framed, sniffed or allowed to leak a referrer.
@@ -41,13 +43,27 @@ def build_app(state: AppState) -> FastAPI:
     """
     @asynccontextmanager
     async def lifespan(app):
+        started = []
         try:
+            for plugin_id, instance in state.plugins.instances():
+                context = PluginHostContext(state.plugins.get(plugin_id).manifest)
+                started.append((instance, context))
+                instance.register_services(context)
+                await instance.startup(context)
             yield
         finally:
-            await asyncio.to_thread(state.runs.shutdown, wait=True)
-            close_provider = getattr(state.services.provider, 'close', None)
-            if close_provider:
-                close_provider()
+            try:
+                for instance, context in reversed(started):
+                    try:
+                        await instance.shutdown(context)
+                    except Exception:
+                        import logging
+                        logging.getLogger(__name__).error('Plugin shutdown failed')
+            finally:
+                await asyncio.to_thread(state.runs.shutdown, wait=True)
+                close_provider = getattr(state.services.provider, 'close', None)
+                if close_provider:
+                    close_provider()
 
     app = FastAPI(
         title="TutorLM instance application",
@@ -76,6 +92,11 @@ def build_app(state: AppState) -> FastAPI:
     app.include_router(graph.router)
     app.include_router(runs.router)
     app.include_router(sources.router)
+    app.include_router(learning.router)
+    for plugin_id, instance in state.plugins.instances():
+        scoped_router = APIRouter(prefix=f'/api/plugins/{plugin_id}', dependencies=[Depends(require_session)])
+        instance.register_routes(scoped_router, PluginHostContext(state.plugins.get(plugin_id).manifest))
+        app.include_router(scoped_router)
 
     @app.exception_handler(404)
     async def _api_fallback(request: Request, _exc) -> Response:  # pragma: no cover - registered handler

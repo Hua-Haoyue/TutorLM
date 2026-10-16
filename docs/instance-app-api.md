@@ -10,7 +10,7 @@
 
 ## 通用约定
 
-- 除 `GET /api/runtime`、`GET /health*`、`POST /api/sessions` 外，均需 `Authorization: Bearer <app session token>`。
+- 除 `GET /api/runtime`、`GET /api/plugins`、`GET /health*`、`POST /api/sessions` 外，均需 `Authorization: Bearer <app session token>`。
 - 错误信封：`{"error":{"code":string,"message":string,"details"?:object}}`；限流/满载返回 `429/503` + `Retry-After`。
 - 业务接口只作用于**当前 env 绑定的 workspace**；不接受客户端提交的 `owner_id`/`workspace_id`。
 - 未匹配的 `/api/*` 返回 `404` JSON，用于区分"API 不存在"与前端路由。
@@ -25,14 +25,17 @@
   "mode": "managed",
   "provider": {"name": "fake", "model": "offline-demo"},
   "plugins": [
-    {"name": "explanation", "enabled": true, "workflows": [{"kind": "explanation"}]},
-    {"name": "narration", "enabled": true, "workflows": [{"kind": "narration"}]}
+    {"id": "documents", "enabled": true, "workflows": []},
+    {"id": "explanations", "enabled": true, "workflows": [{"id": "explanation.v1", "kind": "explanation"}]},
+    {"id": "knowledge-narration", "enabled": true, "workflows": [{"id": "narration.v1", "kind": "narration"}, {"id": "retelling.v1", "kind": "retelling"}]}
   ],
   "limits": {"max_documents_per_session": 50, "max_bytes_per_file": 2097152, "max_runs_per_session": 20}
 }
 ```
 
 前端据 `plugins[].workflows[].kind` 决定是否启用解释/串讲按钮；据 `provider.name` 标识演示模型。
+
+已实现的 SDK、`GET /api/plugins`、回讲及学习数据端点以 [Plugin SDK](plugin-sdk.md) 为准。
 
 ## 2. 会话
 

@@ -47,13 +47,11 @@ from backend.infrastructure.format.tex_project import TexLimits  # noqa: E402
 from backend.plugins.manifests import (  # noqa: E402
     EXPLANATION_MANIFEST,
     NARRATION_MANIFEST,
-    PluginRegistry,
 )
-from backend.application.ports.provider import (  # noqa: E402
-    GenerateResult,
-    ProviderInfo,
-)
-from backend.plugins.ports import ContextItem, WorkflowContext  # noqa: E402
+from backend.host.registry import build_default_registry  # noqa: E402
+from backend.plugin_contracts import Draft, WorkflowInput  # noqa: E402
+from backend.domain.models import Explanation  # noqa: E402
+from backend.domain.errors import InvalidInputError  # noqa: E402
 from backend.plugins.workflows import ExplanationWorkflow, NarrationWorkflow  # noqa: E402
 
 REGISTRY = ExtractorRegistryImpl()
@@ -335,89 +333,68 @@ def test_source_ref_roundtrip_and_whole_document():
 # 插件 / workflow
 # ----------------------------------------------------------------------
 
-class _FakeProvider:
-    """实现 foundation ``ModelProvider`` 协议（info + generate + close）。"""
-
-    def __init__(self, *, text: str = "answer") -> None:
-        self._text = text
-        self.info = ProviderInfo(name="fake", model="offline")
-
-    def generate(self, request):
-        return GenerateResult(text=self._text, provider="fake", model="offline")
-
-    def close(self) -> None:
-        return None
-
-
-def _context() -> WorkflowContext:
-    return WorkflowContext(items=(ContextItem(document_id="d", revision_id="r", text="引用内容"),))
+def _context(explain=None):
+    from types import SimpleNamespace
+    def generate(**kwargs):
+        return Explanation.create(project_id='p', node_id=kwargs['node_id'], question=kwargs.get('question'),
+                                  answer='这是解释', provider='fake', model='offline')
+    return SimpleNamespace(container=SimpleNamespace(explanations=SimpleNamespace(explain=explain or generate)),
+                           cancel=SimpleNamespace(check=lambda: None))
 
 
 def test_plugin_registry_exposes_workflows():
-    registry = PluginRegistry()
-    names = {p["name"] for p in registry.runtime_view()}
-    assert {"explanation", "narration"} <= names
-    assert registry.workflow_for_kind("explanation") is not None
-    assert registry.workflow_for_kind("tex_compile") is None
+    registry = build_default_registry()
+    assert registry.order == ('documents', 'explanations', 'knowledge-narration')
+    assert {'explanation', 'narration', 'retelling'} <= set(registry.executable_kinds())
+    assert registry.supports('tex_compile') is False
 
 
 def test_manifests_declare_model_workload_only():
     for manifest in (EXPLANATION_MANIFEST, NARRATION_MANIFEST):
         assert manifest.workflows
-        assert all(wf.workload == "model" for wf in manifest.workflows)
+        assert all(wf.id and wf.kind and wf.input_schema for wf in manifest.workflows)
 
 
 def test_explanation_workflow_consumes_context_and_provider():
-    workflow = ExplanationWorkflow(_FakeProvider(text="这是解释"))
-    payload = workflow.validate_input({"refs": [{"document_id": "d", "revision_id": "r"}], "question": "为什么"})
-    result = workflow.run(_context(), payload)
-    assert result.answer == "这是解释"
-    assert result.provider == "fake"
+    workflow = ExplanationWorkflow()
+    result = workflow.run(_context(), WorkflowInput(kind='explanation', payload={'node_id': 'n', 'question': '为什么'}))
+    assert isinstance(result, Draft)
+    assert result.entity.answer == '这是解释'
+    assert result.provider == 'fake'
 
 
-def test_explanation_workflow_requires_refs():
-    workflow = ExplanationWorkflow(_FakeProvider())
-    from backend.application.format import InvalidRunInput
-
-    with pytest.raises(InvalidRunInput):
-        workflow.validate_input({"question": "no refs"})
+def test_explanation_workflow_requires_node_id():
+    with pytest.raises(InvalidInputError):
+        build_default_registry().execute('explanation', _context(), {'question': 'no node'})
 
 
 def test_explanation_workflow_fails_when_provider_unavailable():
     from backend.domain.errors import ProviderUnavailable
 
-    class _DeadProvider:
-        def __init__(self) -> None:
-            self.info = ProviderInfo(name="fake", model="offline")
-
-        def generate(self, request):  # pragma: no cover - 端口不可用时实现应报错
-            raise ProviderUnavailable("provider 不可用")
-
-        def close(self) -> None:
-            return None
-
-    workflow = ExplanationWorkflow(_DeadProvider())
-    payload = workflow.validate_input({"refs": [{"document_id": "d", "revision_id": "r"}]})
+    def explain(**kwargs):
+        raise ProviderUnavailable('Provider unavailable')
+    workflow = ExplanationWorkflow()
     with pytest.raises(ProviderUnavailable):
-        workflow.run(_context(), payload)
+        workflow.run(_context(explain), WorkflowInput('explanation', {'node_id': 'n'}))
 
 
 def test_narration_workflow_derives_counts_and_duration():
-    workflow = NarrationWorkflow(_FakeProvider(text="段落内容"))
-    payload = workflow.validate_input(
-        {"refs": [{"document_id": "d", "revision_id": "r"}], "node_ids": ["n1", "n2"], "title": "串讲"}
-    )
-    result = workflow.run(_context(), payload, narration_id="nar1")
+    from types import SimpleNamespace
+    from backend.application.ports.model_provider import ProviderCapabilities
+    from backend.domain.models import Node
+    nodes = [Node(id=n, project_id='p', document_id='d', title=n, kind='concept', revision=1,
+                  created_at=0, updated_at=0) for n in ('n1', 'n2')]
+    context = SimpleNamespace(container=SimpleNamespace(context=SimpleNamespace(
+        projects=SimpleNamespace(get=lambda _: SimpleNamespace(title='Project')),
+        nodes=SimpleNamespace(get=lambda key: next(n for n in nodes if n.id == key)),
+        provider=SimpleNamespace(narrate=lambda request: ['one', 'two'], capabilities=ProviderCapabilities('fake', 'offline')),
+    )), cancel=SimpleNamespace(check=lambda: None))
+    result = NarrationWorkflow().run(context, WorkflowInput('narration', {'project_id': 'p', 'node_ids': ['n1', 'n2']})).entity
     assert result.segment_count == len(result.segments) == 2
     assert result.total_duration_seconds == pytest.approx(sum(s.duration_seconds for s in result.segments))
     assert [s.node_id for s in result.segments] == ["n1", "n2"]
 
 
 def test_narration_workflow_rejects_too_many_nodes():
-    from backend.application.format import InvalidRunInput
-
-    workflow = NarrationWorkflow(_FakeProvider())
-    with pytest.raises(InvalidRunInput):
-        workflow.validate_input(
-            {"refs": [{"document_id": "d", "revision_id": "r"}], "node_ids": [f"n{i}" for i in range(11)]}
-        )
+    with pytest.raises(InvalidInputError):
+        build_default_registry().execute('narration', _context(), {'project_id': 'p', 'node_ids': [f'n{i}' for i in range(11)]})

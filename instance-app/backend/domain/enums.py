@@ -92,6 +92,7 @@ class RunKind(StrEnum):
 
     EXPLANATION = "explanation"
     NARRATION = "narration"
+    RETELLING = 'retelling'
 
 
 class StorageLayout(StrEnum):

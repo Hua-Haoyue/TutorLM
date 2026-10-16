@@ -7,6 +7,11 @@
 [`../../docs/instance-app-design.md`](../../docs/instance-app-design.md) 与
 [`../../docs/instance-app-api.md`](../../docs/instance-app-api.md)。
 
+插件直接使用 [Plugin SDK v1](../../docs/plugin-sdk.md)：统一 manifest、生命周期、
+`WorkflowInput -> Draft`、请求对象式 ModelProvider 与 Host 原子提交。
+内置插件 ID 为 `documents`、`explanations`、`knowledge-narration`，
+支持 `explanation`、`narration`、`retelling` 三类任务；没有独立兼容层。
+
 **能力边界（不要当作已交付）**：
 
 - HTTP 层**不提供** `/docs` 与 `/openapi.json`（`docs_url=None`，设计 §6 的有意选择）；
@@ -35,7 +40,9 @@ backend/
     health.py         #   HealthService：/health 与 /health/ready 载荷
     binding.py        #   workspace 绑定校验与布局标记落盘（纯判定见 domain/workspace_binding.py）
     storage_probe.py  #   就绪判定所需的存储事实采集（无策略）
-    plugins.py        #   静态插件注册表（explanation / narration）
+    registry.py       #   SDK 注册表、依赖校验与统一工作流执行
+    plugins.py        #   内置插件选择
+    context.py        #   工作区限定的插件上下文与提交前检查
     errors.py         #   Host 层错误类型
     local/            #   本地装配：FakeProvider / LocalStore / LocalStorage / SessionStore
   domain/             # 纯领域模型与规则（无 IO、无框架）：models, enums, values, run,
@@ -51,8 +58,8 @@ backend/
     providers/        # fake / openai_compatible（密钥只来自 Settings，不读 env）
   adapters/http/      # 路由、schemas、错误映射、multipart、dependencies（同源，供网关代理）
     routers/          #   health, runtime, sessions, projects, documents, graph, runs, sources
-  plugins/            # 静态插件：manifests、ports、workflows/{explanation,narration}
-  plugin_contracts/   # 插件契约：kind / workflow / 输入输出 schema
+  plugins/            # 静态插件：documents、explanations、knowledge_narration
+  plugin_contracts/   # SDK v1：manifest、context、workflow、result、validation、learning
   tests/              # 见下方“测试”
 ```
 

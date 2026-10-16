@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from backend.host import errors as app_errors
+from backend.domain.errors import DomainError
 
 #: Starlette's default status -> our code vocabulary (only what we can hit).
 _STATUS_CODES: Mapping[int, str] = {
@@ -74,6 +75,10 @@ def _domain_error_payload(exc: Exception) -> tuple[int, str, str, dict[str, Any]
 
 def install_error_handlers(app: FastAPI) -> None:
     """Register handlers so *every* failure leaves as the same envelope."""
+
+    @app.exception_handler(DomainError)
+    async def _domain(_: Request, exc: DomainError) -> JSONResponse:
+        return error_response(exc.http_status, exc.code, str(exc), details=exc.details)
 
     @app.exception_handler(app_errors.AppError)
     async def _host_error(_: Request, exc: app_errors.AppError) -> JSONResponse:

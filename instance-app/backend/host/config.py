@@ -142,7 +142,7 @@ class HostConfig:
     session_ttl_seconds: int = 3600
     provider: ProviderConfig = field(default_factory=ProviderConfig)
     limits: Limits = field(default_factory=Limits)
-    enabled_plugins: tuple[str, ...] = ("explanation", "narration")
+    enabled_plugins: tuple[str, ...] = ('documents', 'explanations', 'knowledge-narration')
     extractor_version: str = "host-fallback-1"
     tex_compiler_available: bool = False
     run_workers: int = 2
@@ -263,7 +263,7 @@ class HostConfig:
             session_ttl_seconds=_int(env, "TUTORLM_SESSION_TTL_SECONDS", 3600),
             provider=provider,
             limits=limits,
-            enabled_plugins=("explanation", "narration"),
+            enabled_plugins=tuple(value.strip() for value in (env.get('TUTORLM_ENABLED_PLUGINS') or 'documents,explanations,knowledge-narration').split(',')),
             tex_compiler_available=_flag(env, "TUTORLM_TEX_COMPILER_AVAILABLE", False),
             run_workers=_int(env, "TUTORLM_RUN_WORKERS", 2),
             run_queue_size=_int(env, "TUTORLM_RUN_QUEUE_SIZE", 32),
