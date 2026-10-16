@@ -4,10 +4,10 @@
 
 ```text
 runtime-host/                 容器外团队
-  control-plane/              FastAPI 控制面及测试
+  control-plane/              用户、持久项目、邀请码准入、临时计算租约与测试
   gateway/                    Nginx 网关
   deploy/                     新结构下的外层部署入口
-instance-app/                 容器内团队，当前仅建立目录与开发边界
+instance-app/                 容器内团队，含前端租约生命周期与邀请码入口模块
   backend/                    业务 API、Runtime Host、插件、任务、存储
   frontend/                   学习工作台与浏览器端接入逻辑
   deploy/                     应用镜像构建归属
@@ -29,6 +29,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r runtime-host/control-plane/requirements-dev.txt
 .\.venv\Scripts\python.exe -m pytest runtime-host/control-plane/tests -q
 .\.venv\Scripts\python.exe scripts/check-boundaries.py
+node --test instance-app/frontend/tests/*.test.js
 .\scripts\dev-runtime-host.ps1
 ```
 
@@ -36,15 +37,26 @@ python -m venv .venv
 `/docs` 可查看接口，`/control/capacity` 可查看容量。fake adapter 不会启动真实应用，
 因此这个模式用于独立开发调度逻辑，不提供学习工作台。
 
+控制面配置可用 TOML 文件叠加环境变量，见
+[docs/configuration.md](docs/configuration.md) 与仓库根的 `config.example.toml`；
+CLI 用法见 [docs/cli.md](docs/cli.md)。
+
 Docker 联调见 [runtime-host/deploy/README.md](runtime-host/deploy/README.md)。
-容器内应用尚未实现，不能将当前仓库视为完整应用交付物。
+容器内业务应用与完整工作台尚未实现；现有前端模块（租约生命周期、邀请码入口）需在工作台中接入。
+不能将当前仓库视为完整应用交付物。
 
 ## 协作入口
 
 - [架构与责任边界](docs/architecture.md)
 - [多人并行开发流程](docs/development.md)
+- [持久工作区、邀请码与分享](docs/workspaces.md)
+- [控制面配置](docs/configuration.md)
+- [控制面 CLI](docs/cli.md)
 - [实例运行协议 v1](contracts/instance-runtime-v1.md)
+- [持久实例协议 v2](contracts/instance-runtime-v2.md)
+- [持久实例协议 v3](contracts/instance-runtime-v3.md)
 - [网关与租约协议 v1](contracts/gateway-lease-v1.md)
+- [网关与租约协议 v2](contracts/gateway-lease-v2.md)
 
-凭据、本地 `.env`、数据库、数据卷、日志和镜像不纳入版本控制。
+凭据、本地 `.env`、真实控制面配置文件、数据库、数据卷、日志和镜像不纳入版本控制。
 不提交或推送任何内容，直到维护者明确执行 Git 提交与推送。

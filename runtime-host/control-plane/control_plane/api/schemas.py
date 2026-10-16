@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -11,6 +12,23 @@ class LeaseCreateRequest(BaseModel):
     """``POST /control/leases`` 的请求体。"""
 
     label: str = Field(default="", max_length=64)
+    workspace_id: UUID | None = None
+    #: 访客填写的邀请码。服务端只从中推导权限与优先级，
+    #: **不会**接受任何客户端传入的 priority 字段。
+    invitation_code: str | None = Field(default=None, max_length=128)
+
+
+class UserLoginRequest(BaseModel):
+    user_id: UUID
+    recovery_token: str = Field(min_length=1, max_length=256)
+
+
+class WorkspaceCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=200, pattern=r'\S')
+
+
+class LeasePageRequest(BaseModel):
+    page_id: UUID
 
 
 class LeaseCreateResponse(BaseModel):
@@ -74,3 +92,37 @@ class HealthResponse(BaseModel):
     adapter: str
     slots_total: int
     slots_free: int
+
+
+class AccessPolicyResponse(BaseModel):
+    """公开的能力探针：只回答"需不需要邀请码"与哪些能力启用。
+
+    不包含任何码、配置或内部计数，因此可以对未认证的前端公开。
+    """
+
+    invitation_only: bool
+    system_invitation_supported: bool = True
+    project_sharing_supported: bool = True
+
+
+class InvitationCreateRequest(BaseModel):
+    label: str = Field(default="", max_length=64)
+
+
+class ShareInvitationCreateRequest(BaseModel):
+    label: str | None = Field(default=None, max_length=64)
+
+
+class WorkspaceImportRequest(BaseModel):
+    invitation_code: str = Field(min_length=1, max_length=128)
+    title: str | None = Field(default=None, max_length=200)
+
+
+class InvitationListResponse(BaseModel):
+    items: list[dict[str, Any]]
+
+
+class WorkspaceImportResponse(BaseModel):
+    workspace: dict[str, Any]
+    #: 命中已有副本时为 ``True``（幂等或默认去重）。
+    reused: bool = False

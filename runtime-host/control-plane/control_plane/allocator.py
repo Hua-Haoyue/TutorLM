@@ -33,9 +33,16 @@ from control_plane.errors import (
     LeaseNotFound,
     RuntimeUnavailable,
 )
+from control_plane.invitations import (
+    DEFAULT_PRIORITY,
+    SYSTEM_PRIORITY,
+    Admission,
+    InvitationService,
+)
 from control_plane.lifecycle import SlotLifecycle
 from control_plane.security import generate_token, hash_token, verify_token
 from control_plane.store import ControlPlaneStore
+from control_plane.workspaces import WorkspaceService
 
 logger = logging.getLogger(__name__)
 
@@ -78,21 +85,79 @@ class Allocator:
         *,
         activity_probe: ActivityProbe | None = None,
         clock: Callable[[], float] = time.time,
+        workspace_service: WorkspaceService | None = None,
+        invitations: InvitationService | None = None,
     ) -> None:
         self._config = config
         self._store = store
         self._lifecycle = lifecycle
         self._activity = activity_probe or AlwaysBusyProbe()
         self._clock = clock
+        self._workspaces = workspace_service
+        self._invitations = invitations
 
     # ------------------------------------------------------------- 分配
-    def allocate(self, *, label: str = "") -> AllocationResult:
+    def admit(self, code: str | None, *, workspace_id: str | None = None, user_id: str | None = None) -> Admission:
+        """评估这次请求的入场资格。未配置邀请码服务时保持旧行为。"""
+
+        if self._invitations is None:
+            return Admission(allowed=True, priority=DEFAULT_PRIORITY)
+        return self._invitations.admit(code, workspace_id=workspace_id, user_id=user_id)
+
+    def allocate(
+        self,
+        *,
+        label: str = '',
+        workspace_id: str | None = None,
+        user_id: str | None = None,
+        priority: int = DEFAULT_PRIORITY,
+    ) -> AllocationResult:
         """分配一个槽位并启动到就绪。
+
+        ``priority`` 只能由控制面在验证邀请码后传入；HTTP 层永远不会把
+        客户端字段直接作为它传进来。
 
         失败时租约置 FAILED、槽位进入隔离，并把错误向上抛；调用方（HTTP 层）
         负责转成 503/429，绝不能返回一个不可用的 upstream。
         """
 
+        with self._lifecycle.scheduling_lock:
+            return self._allocate_locked(
+                label=label, workspace_id=workspace_id, user_id=user_id, priority=priority
+            )
+
+    def _allocate_locked(
+        self,
+        *,
+        label: str,
+        workspace_id: str | None,
+        user_id: str | None,
+        priority: int,
+    ) -> AllocationResult:
+        try:
+            return self._place_lease(
+                label=label, workspace_id=workspace_id, user_id=user_id, priority=priority
+            )
+        except CapacityError:
+            # 满槽且这是最高优先级：在同一个调度锁下选择可安全回收的受控
+            # active 租约，先置换再重试。绝不 prune 任意容器。
+            if priority < SYSTEM_PRIORITY:
+                raise
+            victim = self._preempt_one()
+            if victim is None:
+                raise CapacityError('没有可安全抢占的槽位，请稍后再试')
+            return self._place_lease(
+                label=label, workspace_id=workspace_id, user_id=user_id, priority=priority
+            )
+
+    def _place_lease(
+        self,
+        *,
+        label: str,
+        workspace_id: str | None,
+        user_id: str | None,
+        priority: int,
+    ) -> AllocationResult:
         lease_id = uuid.uuid4().hex
         token = generate_token()
         token_hash = hash_token(token, self._pepper())
@@ -103,6 +168,10 @@ class Allocator:
             token_hash=token_hash,
             ttl_seconds=self._config.lease_ttl_seconds,
             label=label,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            workspace_idle_seconds=self._config.workspace_idle_ttl_seconds,
+            priority=priority,
         )
         slot = self._store.require_slot(lease.slot_id)
 
@@ -133,6 +202,30 @@ class Allocator:
             ready_payload=result.ready_payload,
         )
 
+    def _preempt_one(self) -> str | None:
+        """在调度锁内选一个可安全回收的受控租约并回收它。
+
+        选择规则：最低优先级优先，同优先级选最旧（``created_at``）。只考虑
+        ``state='active'`` 的受控租约与已就绪槽位；仍在 provisioning/copy 的
+        槽位根本不在候选集合里。
+
+        回收路径保留持久卷：先冻结租约（阻止新入场），再停容器并释放槽位。
+        停止失败时槽位进入隔离，本次抢占不能分配该槽位，返回 ``None`` 让
+        调用方继续尝试其他候选或最终返回 503。
+        """
+
+        now = self._clock()
+        candidates = self._store.preempt_candidates(now=now, exclude_priority_at_least=SYSTEM_PRIORITY)
+        for victim, slot_id in candidates:
+            if not self._store.mark_preempting(victim.lease_id, reason='preempted_by_invitation'):
+                continue
+            final = self._reclaim_lease(self._store.require_lease(victim.lease_id))
+            if final.state == LeaseState.RECLAIMED:
+                return victim.lease_id
+            # 停止失败 -> 槽位已被隔离，继续尝试下一个候选。
+            logger.warning('抢占回收失败，尝试下一个候选：%s', victim.lease_id)
+        return None
+
     def resume(self, token: str | None) -> Lease | None:
         """尝试把 ``token`` 解析成一个仍可复用的活跃租约（验收项 T1.2）。
 
@@ -155,18 +248,29 @@ class Allocator:
         self._store.touch_lease(lease.lease_id, at=self._clock())
         return lease
 
+    def promote(self, lease_id: str, priority: int) -> Lease:
+        """把已有租约在原地提升优先级（不新占槽位）。
+
+        用于同一浏览器已持有普通租约后，再出示有效系统码的场景：
+        应该就地把它升为最高优先级，而不是再分一个槽位。CAS 保证只升不降。
+        """
+
+        lease = self._store.promote_lease_priority(lease_id, priority)
+        if lease.state in {LeaseState.PENDING, LeaseState.ACTIVE}:
+            self._store.record_event(
+                'lease.priority_promoted',
+                lease_id=lease_id, slot_id=lease.slot_id,
+                payload={'priority': lease.priority},
+            )
+        return lease
+
     def _pepper(self) -> str:
         """令牌盐：配置优先，否则持久化一个随机值（重启后仍能验证旧令牌）。"""
 
         configured = self._config.token_pepper.strip()
         if configured:
             return configured
-        stored = self._store.get_meta("token_pepper")
-        if stored:
-            return stored
-        generated = generate_token(24)
-        self._store.set_meta("token_pepper", generated)
-        return generated
+        return self._store.get_or_create_meta('token_pepper', generate_token(24))
 
     # ------------------------------------------------------------- 解析
     def authenticate(self, token: str | None) -> Lease:
@@ -225,7 +329,7 @@ class Allocator:
         """执行槽位回收，并把租约终结为 RECLAIMED/FAILED。"""
 
         try:
-            self._lifecycle.reclaim(lease.slot_id)
+            self._lifecycle.reclaim(lease.slot_id, expected_lease_id=lease.lease_id)
         except ControlPlaneError as exc:
             logger.error("回收租约 %s 失败：%s", lease.lease_id, exc)
             return self._store.update_lease(
@@ -255,7 +359,7 @@ class Allocator:
             self._store.record_event(
                 "lease.admin_revoked", lease_id=lease.lease_id, slot_id=slot_id
             )
-        slot = self._lifecycle.reclaim(slot_id)
+        slot = self._lifecycle.reclaim(slot_id, expected_lease_id=lease.lease_id if lease else None)
         if lease is not None and not lease.is_terminal:
             self._store.update_lease(lease.lease_id, state=LeaseState.RECLAIMED)
         return slot
@@ -286,14 +390,25 @@ class Allocator:
         now = self._clock()
         report: dict[str, Any] = {"expired": [], "reclaimed": [], "failed": [], "skipped_busy": []}
         for lease in self._store.list_live_leases():
+            page_deadline = self._store.page_deadline(
+                lease.lease_id, self._config.page_heartbeat_timeout_seconds,
+                self._config.page_close_grace_seconds,
+            )
+            page_expired = page_deadline is not None and page_deadline <= now
             expired = is_lease_expired(
                 lease, now=now, idle_ttl_seconds=self._config.lease_idle_ttl_seconds
-            )
+            ) or page_expired
             absolute_only = lease.expires_at <= now
             if not expired:
                 continue
+            if page_expired and not absolute_only:
+                if not self._store.expire_disconnected_pages(
+                    lease.lease_id, self._config.page_heartbeat_timeout_seconds,
+                    self._config.page_close_grace_seconds,
+                ):
+                    continue
             # 空闲回收必须确认没有活动任务，避免打断长生成。
-            if not absolute_only and lease.upstream:
+            if not absolute_only and not page_expired and lease.upstream:
                 try:
                     if self._activity.has_active_runs(lease.upstream):
                         report["skipped_busy"].append(lease.lease_id)
@@ -307,7 +422,8 @@ class Allocator:
                 self._store.update_lease(lease.lease_id, state=LeaseState.EXPIRED)
                 report["expired"].append(lease.lease_id)
                 self._store.record_event(
-                    "lease.expired", lease_id=lease.lease_id, slot_id=lease.slot_id
+                    'lease.page_disconnected' if page_expired and not absolute_only else 'lease.expired',
+                    lease_id=lease.lease_id, slot_id=lease.slot_id,
                 )
 
             current = self._store.require_lease(lease.lease_id)
@@ -315,6 +431,10 @@ class Allocator:
                 final = self._reclaim_lease(current)
                 key = "reclaimed" if final.state == LeaseState.RECLAIMED else "failed"
                 report[key].append(lease.lease_id)
+        if self._workspaces is not None:
+            storage = self._workspaces.gc_once()
+            report['workspaces_deleted'] = storage['deleted']
+            report['workspaces_failed'] = storage['failed']
         return report
 
     def shutdown(self) -> None:

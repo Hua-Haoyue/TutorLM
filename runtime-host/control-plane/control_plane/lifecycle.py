@@ -17,17 +17,23 @@ from __future__ import annotations
 
 import logging
 import time
+import threading
 from dataclasses import dataclass
+from functools import wraps
 from typing import Any
 
 from control_plane.config import ControlPlaneConfig
 from control_plane.domain.models import (
     Lease,
     LeaseState,
+    LEGACY_DATA_DIRECTORY,
+    STORAGE_LAYOUT_CONTENT_ONLY,
     Slot,
     SlotState,
     WorkloadState,
     can_transition,
+    workspace_data_directory,
+    workspace_data_path,
 )
 from control_plane.errors import (
     ControlPlaneError,
@@ -35,10 +41,21 @@ from control_plane.errors import (
     RuntimeUnavailable,
     SlotBusy,
 )
-from control_plane.ports import InstanceSpec, RuntimeAdapter, VolumeSpec
+from control_plane.ports import InstanceSpec, RuntimeAdapter
 from control_plane.store import ControlPlaneStore
 
 logger = logging.getLogger(__name__)
+
+
+def _slot_operation(operation):
+    @wraps(operation)
+    def guarded(self, target, *args, **kwargs):
+        slot_id = target.slot_id if isinstance(target, Slot) else target
+        with self._locks_guard:
+            lock = self._slot_locks.setdefault(slot_id, threading.RLock())
+        with lock:
+            return operation(self, target, *args, **kwargs)
+    return guarded
 
 
 @dataclass(slots=True)
@@ -64,6 +81,12 @@ class SlotLifecycle:
         self._config = config
         self._store = store
         self._adapter = adapter
+        self._locks_guard = threading.Lock()
+        self._slot_locks: dict[int, Any] = {}
+        #: 全局调度协调锁。入场抢占、卷复制与回收都在它下面做
+        #: "选择受害者 -> 置换 -> 重分配"的组合动作，避免两个请求同时
+        #: 抢同一个槽位。它不是 GC 不删卷的保证（那一点靠 DB pin）。
+        self.scheduling_lock = threading.RLock()
 
     # ================================================================ helpers
     def _transition_workload(
@@ -112,23 +135,55 @@ class SlotLifecycle:
 
     def _build_spec(self, slot: Slot, generation: int) -> InstanceSpec:
         config = self._config
+        env = dict(config.instance_env)
+        labels = config.labels()
+        volume_name = config.volume_name(slot.slot_id)
+        volume_must_exist = False
+        lease = self._store.require_lease(slot.lease_id) if slot.lease_id else None
+        if lease and lease.workspace_id:
+            workspace = self._store.require_workspace(lease.workspace_id)
+            volume_must_exist = bool(workspace.storage_initialized)
+            volume_name = config.workspace_volume_name(workspace.workspace_id)
+            if workspace.state != 'active' or workspace.volume_name != volume_name:
+                raise RuntimeUnavailable('Workspace is unavailable or its volume is invalid')
+            # 路径不能相信客户端或旧数据：从已持久化的 UUID 元数据重新推导并校验。
+            data_directory = workspace_data_directory(workspace)
+            data_path = workspace_data_path(config.instance_mount_path, data_directory)
+            labels.update({'tutorlm.workspace_id': workspace.workspace_id, 'tutorlm.user_id': workspace.user_id})
+            env.update({
+                'TUTORLM_WORKSPACE_ID': workspace.workspace_id,
+                'TUTORLM_OWNER_ID': workspace.user_id,
+                'TUTORLM_PERSISTENT_WORKSPACE': 'true',
+                # 容器内真实数据根（含项目子目录），与 mount_path 一致。
+                'TUTORLM_DATA_DIR': data_path,
+                'TUTORLM_WORKSPACE_SUBDIRECTORY': data_directory,
+                # 应用 session/鉴权数据必须放在卷外临时目录，
+                # 避免被卷复制带走成为接收者身份。
+                'TUTORLM_SESSION_DATA_DIR': self._session_data_dir(slot.slot_id),
+            })
         return InstanceSpec(
             slot_id=slot.slot_id,
             generation=generation,
             container_name=config.container_name(slot.slot_id, generation),
             image=config.instance_image,
-            volume_name=config.volume_name(slot.slot_id),
+            volume_name=volume_name,
             mount_path=config.instance_mount_path,
             internal_port=config.instance_port,
-            env=dict(config.instance_env),
-            labels=config.labels(),
+            env=env,
+            labels=labels,
             network=config.network,
             mem_limit=config.mem_limit,
             cpus=config.cpus,
             pids_limit=config.pids_limit,
             tmpfs_size=config.tmpfs_size,
             stop_grace_seconds=config.stop_grace_seconds,
+            volume_must_exist=volume_must_exist,
         )
+
+    def _session_data_dir(self, slot_id: int) -> str:
+        """卷外的 session/鉴权目录。每个槽位一个临时路径，不会被卷复制。"""
+
+        return f"/tmp/tutorlm-session/s{int(slot_id):02d}"
 
     def _wait_ready(self, upstream: str) -> tuple[bool, str | None, dict[str, Any] | None]:
         """轮询就绪探针。真实适配器有 ``wait_ready``，fake 只有 ``probe``。"""
@@ -154,6 +209,7 @@ class SlotLifecycle:
             time.sleep(self._config.ready_poll_interval_seconds)
 
     # ============================================================ provision
+    @_slot_operation
     def provision(self, slot: Slot) -> ProvisionResult:
         """把已占位的槽位推进到 READY。
 
@@ -164,9 +220,15 @@ class SlotLifecycle:
         """
 
         generation = slot.generation
-        spec = self._build_spec(slot, generation)
+        current = self._store.require_slot(slot.slot_id)
+        if current.lease_id != slot.lease_id or current.generation != generation:
+            return ProvisionResult(ok=False, slot=current, detail='Compute slot ownership changed before startup')
         try:
+            spec = self._build_spec(slot, generation)
+            self._store.update_slot(slot.slot_id, container_name=spec.container_name)
             self._adapter.create(spec)
+            if spec.env.get('TUTORLM_WORKSPACE_ID'):
+                self._store.mark_workspace_initialized(spec.env['TUTORLM_WORKSPACE_ID'])
             self._transition_workload(slot.slot_id, WorkloadState.CREATED)
             self._adapter.start(spec.container_name)
             self._transition_workload(slot.slot_id, WorkloadState.STARTING)
@@ -179,6 +241,19 @@ class SlotLifecycle:
 
         upstream = f"http://{spec.container_name}:{self._config.instance_port}"
         ready, detail, payload = self._wait_ready(upstream)
+        workspace_id = spec.env.get('TUTORLM_WORKSPACE_ID')
+        if ready and workspace_id and (
+            (payload or {}).get('workspace_id') != workspace_id
+            or (payload or {}).get('storage_mode') != 'persistent'
+        ):
+            ready, detail = False, 'Application does not confirm the persistent workspace contract'
+        if ready and workspace_id:
+            # 应用可以在就绪声明中升级存储布局。只有声明 content_only
+            # 后，项目才允许作为分享复制的源。未声明保持 legacy，
+            # 因此旧项目不会被静默当成可分享。
+            declared = str((payload or {}).get('storage_layout') or '').strip()
+            if declared == STORAGE_LAYOUT_CONTENT_ONLY:
+                self._store.mark_workspace_layout(workspace_id, STORAGE_LAYOUT_CONTENT_ONLY)
         if not ready:
             # 关键：未就绪绝不交给访客。停掉容器并隔离，避免半死实例被复用。
             self._best_effort_stop(spec.container_name)
@@ -231,11 +306,12 @@ class SlotLifecycle:
             logger.warning("停止容器 %s 失败：%s", container_name, exc)
             return False
 
-    def reclaim(self, slot_id: int) -> Slot:
-        """完整回收：停止 -> 删除容器 -> 删除数据卷 -> 新代次 -> FREE。
+    @_slot_operation
+    def reclaim(self, slot_id: int, *, expected_lease_id: str | None = None) -> Slot:
+        """Release compute; durable workspace volumes are reclaimed by storage GC.
 
         任何一步失败都隔离槽位并抛出，**不会**把槽位放回 FREE。
-        这是"stop 不等于删除数据"落地的地方：只有这里会删卷。
+        持久项目仅释放容器；卷的删除由独立存储 GC 管理。
         """
 
         slot = self._store.get_slot(slot_id)
@@ -243,6 +319,10 @@ class SlotLifecycle:
             raise SlotBusy(f"槽位 {slot_id} 不存在")
 
         container_name = slot.container_name
+        if expected_lease_id is not None and slot.lease_id != expected_lease_id:
+            raise SlotBusy('Lease no longer owns this compute slot')
+        lease = self._store.require_lease(slot.lease_id) if slot.lease_id else None
+        durable = lease is not None and lease.workspace_id is not None
         volume_name = self._config.volume_name(slot_id)
         self._store.update_slot(slot_id, state=SlotState.RECLAIMING)
 
@@ -269,9 +349,10 @@ class SlotLifecycle:
             self._quarantine(slot_id, f"回收时删除容器失败：{exc}")
             raise RuntimeUnavailable(f"回收槽位 {slot_id} 失败：删除容器时出错") from exc
 
-        # 3) 删除专属数据卷——这一步之后上一位访客的数据才真正消失
+        # Anonymous volumes are ephemeral; durable workspace volumes survive compute teardown.
         try:
-            self._adapter.remove_volume(volume_name)
+            if not durable:
+                self._adapter.remove_volume(volume_name)
         except Exception as exc:  # noqa: BLE001
             self._quarantine(slot_id, f"回收时删除数据卷失败：{exc}")
             raise RuntimeUnavailable(f"回收槽位 {slot_id} 失败：删除数据卷时出错") from exc
@@ -294,6 +375,7 @@ class SlotLifecycle:
         )
         return updated
 
+    @_slot_operation
     def release_quarantine(self, slot_id: int, *, reason: str = "") -> Slot:
         """人工确认后解除隔离并回收为新代次。
 

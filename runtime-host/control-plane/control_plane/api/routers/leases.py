@@ -1,6 +1,6 @@
 """访客租约接口与网关准入（admission）。
 
-``POST /control/leases`` 是本项目里唯一"创建资源"的公开入口，因此这里
+``POST /control/leases`` 是申请计算资源的入口；这里
 不信任任何客户端传入的槽位/上游地址：槽位由分配器选，upstream 由控制面
 在容器就绪后回填。
 
@@ -28,8 +28,14 @@ from control_plane.api.schemas import (
     LeaseCurrentResponse,
 )
 from control_plane.config import ControlPlaneConfig
-from control_plane.errors import ControlPlaneError, InvalidToken, UntrustedUpstream
+from control_plane.errors import (
+    ControlPlaneError,
+    InvalidToken,
+    UntrustedUpstream,
+)
 from control_plane.security import bearer_token
+from control_plane.api.routers.workspaces import current_user
+from control_plane.errors import SlotBusy
 
 router = APIRouter(prefix="/control/leases", tags=["leases"])
 admission_router = APIRouter(prefix="/control", tags=["admission"])
@@ -135,9 +141,29 @@ def create_lease(
     """
 
     label = payload.label if payload is not None else ""
+    invitation_code = payload.invitation_code if payload is not None else None
+    workspace_id = str(payload.workspace_id) if payload is not None and payload.workspace_id is not None else None
+    user_id = None
+    if workspace_id is not None:
+        service = request.app.state.workspaces
+        user_id = current_user(request, config, service)['user_id']
+        service.get(workspace_id, user_id)
     credential = _credential(request, config, authorization)
+
+    # 入场判定统一在这里：resume 也不能绕过 invitation-only，否则一个旧
+    # Cookie 就能无限续用而不出示邀请码。显式提供的无效 code 必须被拒绝，
+    # 不能静默退化成"无码入场"。
+    admission = allocator.admit(invitation_code, workspace_id=workspace_id, user_id=user_id)
+
+    # 先看是否已有可复用租约。如果有，就地**提升优先级**（CAS）后返回，
+    # 绝不新占槽位。否则一个浏览器在已有普通租约时再出示系统码，
+    # 会同时占两个槽位而且旧租约仍是低优先级。
     existing = allocator.resume(credential)
     if existing is not None:
+        if workspace_id is not None and existing.workspace_id != workspace_id:
+            raise SlotBusy('Release the current compute lease before switching workspaces')
+        if admission.priority > existing.priority:
+            existing = allocator.promote(existing.lease_id, admission.priority)
         _set_lease_cookie(response, config, credential or "")
         return {
             "lease": existing.to_dict(),
@@ -146,7 +172,10 @@ def create_lease(
             "token_type": "Bearer",
             "resumed": True,
         }
-    result = allocator.allocate(label=label)
+
+    result = allocator.allocate(
+        label=label, workspace_id=workspace_id, user_id=user_id, priority=admission.priority
+    )
     _set_lease_cookie(response, config, result.token)
     return {
         "lease": result.lease.to_dict(),

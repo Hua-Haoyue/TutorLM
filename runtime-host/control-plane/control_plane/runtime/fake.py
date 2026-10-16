@@ -21,6 +21,7 @@ from control_plane.ports import (
     InstanceSpec,
     ReadinessResult,
     RuntimeStatus,
+    VolumeCopySpec,
     VolumeSpec,
 )
 
@@ -45,11 +46,14 @@ class FakeRuntimeAdapter:
         self._lock = threading.RLock()
         self._containers: dict[str, _FakeContainer] = {}
         self._volumes: dict[str, VolumeSpec] = {}
+        self._volume_files: dict[str, dict[str, bytes]] = {}
         # --- 故障注入钩子（测试用） -------------------------------------
         self.fail_create: set[str] = set()
         self.fail_start: set[str] = set()
         self.fail_stop: set[str] = set()
         self.fail_remove_volume: set[str] = set()
+        #: 卷复制故障注入：命中源卷或目标卷名即让 ``copy_volume`` 失败。
+        self.fail_copy: set[str] = set()
         self.never_ready: set[str] = set()
         # --- 调用记录（断言用） -----------------------------------------
         self.calls: list[tuple[str, str]] = []
@@ -66,8 +70,13 @@ class FakeRuntimeAdapter:
         with self._lock:
             self._record("ensure_volume", spec.name)
             if spec.name in self._volumes:
+                if self._volumes[spec.name].labels != spec.labels:
+                    raise RuntimeUnavailable('Volume labels do not match')
                 return False
+            if spec.must_exist:
+                raise RuntimeUnavailable('Persistent workspace volume is missing')
             self._volumes[spec.name] = spec
+            self._volume_files[spec.name] = {}
             return True
 
     def remove_volume(self, name: str) -> bool:
@@ -75,11 +84,66 @@ class FakeRuntimeAdapter:
             self._record("remove_volume", name)
             if name in self.fail_remove_volume:
                 raise RuntimeUnavailable(f"注入的卷删除失败：{name}")
+            if any(c.spec.volume_name == name for c in self._containers.values()):
+                raise RuntimeUnavailable('Volume is still mounted')
+            self._volume_files.pop(name, None)
             return self._volumes.pop(name, None) is not None
 
     def volume_exists(self, name: str) -> bool:
         with self._lock:
             return name in self._volumes
+
+    def copy_volume(self, spec: VolumeCopySpec) -> None:
+        """在内存里把源卷的目录子树复制成独立的新卷内容。
+
+        语义与真实适配器保持**可观测一致**：
+
+        * 源卷必须存在且标签完全匹配，否则报错（不拿 source_uuid 当令牌）；
+        * 目标卷**必须不存在**，绝不覆盖既有项目数据；
+        * 内容按 ``source_directory`` -> ``destination_directory`` 做目录映射，
+          逐条复制成**独立**的 bytes 字典，改源卷不影响副本；
+        * ``exclude_paths``（相对源子树的路径）被跳过；
+        * ``exclude_names`` match reserved basenames at every subtree depth;
+        * ``fail_copy`` 注入可让这次复制失败，便于后端测试回滚路径。
+        """
+
+        with self._lock:
+            self._record('copy_volume', spec.destination.name)
+            source = self._volumes.get(spec.source.name)
+            if source is None:
+                raise RuntimeUnavailable(f'源卷 {spec.source.name} 不存在，拒绝复制')
+            if not spec.source.labels:
+                raise RuntimeUnavailable('源卷必须带归属标签')
+            if source.labels != spec.source.labels:
+                raise RuntimeUnavailable('源卷归属标签不匹配')
+            if spec.destination.name in self._volumes:
+                raise RuntimeUnavailable(
+                    f'拒绝覆盖已存在的目标卷 {spec.destination.name}；卷复制只允许写全新卷'
+                )
+            if spec.destination.name in self.fail_copy or spec.source.name in self.fail_copy:
+                raise RuntimeUnavailable(f'注入的卷复制失败：{spec.destination.name}')
+            if not spec.destination.labels:
+                raise RuntimeUnavailable('目标卷必须带归属标签')
+            if not self.ensure_volume(spec.destination):
+                raise RuntimeUnavailable(f'目标卷 {spec.destination.name} 已存在，拒绝继续复制')
+
+            source_files = self._volume_files.setdefault(spec.source.name, {})
+            destination_files: dict[str, bytes] = {}
+            self._volume_files[spec.destination.name] = destination_files
+            source_prefix = '' if spec.source_directory == '.' else spec.source_directory + '/'
+            destination_prefix = (
+                '' if spec.destination_directory == '.' else spec.destination_directory + '/'
+            )
+            excludes = tuple(spec.exclude_paths)
+            for key, data in source_files.items():
+                if source_prefix and not key.startswith(source_prefix):
+                    continue
+                relative = key[len(source_prefix):] if source_prefix else key
+                if any(part in spec.exclude_names for part in relative.split('/')):
+                    continue
+                if any(relative == item or relative.startswith(item + '/') for item in excludes):
+                    continue
+                destination_files[destination_prefix + relative] = bytes(data)
 
     # ------------------------------------------------------------ 生命周期
     def create(self, spec: InstanceSpec) -> RuntimeStatus:
@@ -90,7 +154,7 @@ class FakeRuntimeAdapter:
             # 与真实 docker 适配器保持一致的**可观测行为**：创建容器时
             # 会确保专属数据卷存在（真实实现由 Docker 自动创建具名卷）。
             # 否则测试就会漏掉"回收是否真的删了卷"这条不变量。
-            self.ensure_volume(VolumeSpec(name=spec.volume_name, labels=spec.labels))
+            self.ensure_volume(VolumeSpec(name=spec.volume_name, labels=spec.labels, must_exist=spec.volume_must_exist))
             existing = self._containers.get(spec.container_name)
             if existing is not None:
                 return self._status_of(existing)
@@ -169,9 +233,15 @@ class FakeRuntimeAdapter:
                     return ReadinessResult(ready=False, detail="注入：永不就绪")
                 container.probes += 1
                 if container.probes >= self.ready_after_probes:
+                    payload = {'status': 'ok', 'mode': 'demo'}
+                    if container.spec.env.get('TUTORLM_WORKSPACE_ID'):
+                        payload.update({
+                            'workspace_id': container.spec.env['TUTORLM_WORKSPACE_ID'],
+                            'storage_mode': 'persistent',
+                        })
                     return ReadinessResult(
                         ready=True,
-                        payload={"status": "ok", "mode": "demo"},
+                        payload=payload,
                     )
                 return ReadinessResult(ready=False, detail="冷启动中")
             return ReadinessResult(ready=False, detail="未找到对应容器")
@@ -191,6 +261,14 @@ class FakeRuntimeAdapter:
         return None
 
     # ------------------------------------------------------------ 测试助手
+    def write_volume(self, name: str, key: str, data: bytes) -> None:
+        with self._lock:
+            self._volume_files[name][key] = data
+
+    def read_volume(self, name: str, key: str) -> bytes:
+        with self._lock:
+            return self._volume_files[name][key]
+
     def snapshot(self) -> dict[str, Any]:
         """便于断言内部实况。"""
 

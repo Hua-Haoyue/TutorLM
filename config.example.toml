@@ -1,0 +1,93 @@
+# TutorLM control-plane configuration (example).
+#
+# Copy to a local path of your choice and point CONTROL_PLANE_CONFIG at it:
+#
+#   CONTROL_PLANE_CONFIG=/etc/tutorlm/control-plane.toml
+#   python -m control_plane serve            # or: ... serve --config <path>
+#
+# This file is a template only: it contains no working credentials.
+# Never commit a real config file; local ones are ignored via .gitignore.
+#
+# Format: TOML, read with the standard library. Two tables are recognised,
+# plus one optional root-level boolean. Unknown keys are rejected so a typo in
+# a security switch fails loudly instead of silently staying "off".
+#
+# Precedence (lowest to highest):
+#   built-in defaults < this file < CONTROL_PLANE_* environment < explicit overrides
+# Every value below can also be set through the matching environment variable;
+# the environment always wins over the file.
+
+# Optional root-level spelling of invitationonly. It is an unambiguous boolean
+# switch, so it may live at the root, but prefer the [control_plane] table.
+# Do not set it in both places with different values.
+# invitationonly = false
+
+[control_plane]
+# --- admission ------------------------------------------------------------
+# Require a valid invitation (system or share code) for every new visitor.
+invitationonly = false
+# Pre-provisioned system invitation codes, seeded at startup. Generate them
+# with the CLI; never hand-write weak strings. Format:
+#   TLM-SYS-v1-<43 base64url chars>   (32 random bytes / 256 bit)
+# Leave the array empty unless you are deliberately pre-configuring access.
+system_invitation_codes = []
+
+# --- instance pool --------------------------------------------------------
+slots = 3
+instance_image = "tutorlm-host:0.2.0-single"
+instance_port = 8000
+instance_mount_path = "/data"
+# network = "tutorlm-local-edge"
+container_prefix = "tutorlm-instance"
+volume_prefix = "tutorlm-instance-data"
+label_key = "app"
+label_value = "tutorlm-instance"
+# docker_host = "unix:///var/run/docker.sock"
+# Local image used only to copy a workspace volume for project sharing.
+# Must already exist locally; the control plane never pulls it. Empty means
+# "fall back to instance_image".
+copy_helper_image = ""
+
+# --- leases ---------------------------------------------------------------
+lease_ttl_seconds = 3600
+lease_idle_ttl_seconds = 0
+reclaim_on_idle = false
+workspace_idle_ttl_seconds = 14400
+page_heartbeat_timeout_seconds = 120
+page_close_grace_seconds = 5
+
+# --- lifecycle ------------------------------------------------------------
+adapter = "docker"          # "fake" for control-plane-only development
+ready_timeout_seconds = 60.0
+ready_poll_interval_seconds = 1.0
+stop_grace_seconds = 30
+mem_limit = "2g"
+cpus = 2.0
+pids_limit = 256
+tmpfs_size = "128m"
+gc_enabled = true
+gc_interval_seconds = 30
+
+# --- auth -----------------------------------------------------------------
+# Secrets belong in the environment or a protected file, not in a shared
+# template. Leave these empty here.
+admin_token = ""
+token_pepper = ""
+lease_cookie_name = "tutorlm_lease"
+lease_cookie_secure = false
+lease_cookie_samesite = "lax"
+# lease_cookie_max_age_seconds = 3600
+
+# --- public ---------------------------------------------------------------
+public_base_url = ""
+public_port = 47823
+
+# Application environment forwarded to every instance container.
+# Keys are upper-cased and prefixed with TUTORLM_ unless already prefixed.
+# Secrets (API keys) belong in the environment, not in this file.
+[instance_env]
+RUN_MODE = "demo"
+DATA_DIR = "/data"
+PROVIDER = "fake"
+# MODEL_API_BASE = "https://example.invalid/v1"
+# MODEL_NAME = "example-model"

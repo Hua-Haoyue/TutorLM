@@ -5,6 +5,15 @@ on:
   pull_request:
 
 jobs:
+  frontend-lifecycle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --test instance-app/frontend/tests/*.test.js
+
   control-plane:
     runs-on: ubuntu-latest
     steps:
@@ -15,11 +24,23 @@ jobs:
       - run: python -m pip install -r runtime-host/control-plane/requirements-dev.txt
       - run: python scripts/check-boundaries.py
       - run: python -m pytest runtime-host/control-plane/tests -q
-      - name: Validate outer Compose configuration
+      - name: CLI smoke (--help)
+        run: python -m control_plane --help
+        env:
+          PYTHONPATH: runtime-host/control-plane
+      - name: Validate environment-mode Compose configuration
         env:
           TUTORLM_FRONTEND_DIR: ../../instance-app/frontend
           TUTORLM_INSTANCE_IMAGE: tutorlm-app:contract-check-only
           TUTORLM_CP_ADMIN_TOKEN: ci-config-only-admin
           TUTORLM_CP_TOKEN_PEPPER: ci-config-only-pepper
-          TUTORLM_INVITE_CODE: ci-config-only-invite
         run: docker compose -f runtime-host/deploy/compose.yml config --quiet
+      - name: Validate file-mode Compose configuration
+        env:
+          TUTORLM_STACK_NAME: tutorlm-ci
+          TUTORLM_FRONTEND_DIR: ../../instance-app/frontend
+          TUTORLM_INSTANCE_IMAGE: tutorlm-app:contract-check-only
+          TUTORLM_CP_ADMIN_TOKEN: ci-config-only-admin
+          TUTORLM_CP_TOKEN_PEPPER: ci-config-only-pepper
+          TUTORLM_CONFIG_FILE: /tmp/tutorlm-ci-control-plane.toml
+        run: docker compose -f runtime-host/deploy/compose.file.yml config --quiet

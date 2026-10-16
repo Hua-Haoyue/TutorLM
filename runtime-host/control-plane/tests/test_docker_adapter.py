@@ -15,6 +15,35 @@ from control_plane.ports import InstanceSpec, VolumeSpec
 from control_plane.runtime.docker_adapter import DockerRuntimeAdapter
 
 
+def test_missing_persistent_volume_is_not_created(docker_adapter, stub):
+    with pytest.raises(RuntimeUnavailable, match='missing'):
+        docker_adapter.ensure_volume(VolumeSpec(name='missing-workspace', must_exist=True))
+    assert stub.volumes.created == []
+
+
+def test_existing_volume_ownership_is_checked_before_mount(docker_adapter, stub):
+    stub.volumes.create('vol-s00', labels={'app': 'unrelated-pool'})
+    with pytest.raises(RuntimeUnavailable, match='ownership'):
+        docker_adapter.create(_spec())
+    assert stub.containers.created_kwargs == []
+
+
+def test_volume_inspection_failure_is_not_treated_as_absence(docker_adapter, monkeypatch):
+    def fail(name):
+        raise RuntimeError('permission denied')
+    monkeypatch.setattr(docker_adapter._client.volumes, 'get', fail)
+    with pytest.raises(RuntimeUnavailable, match='inspect'):
+        docker_adapter.remove_volume('vol-s00')
+
+
+def test_volume_removal_never_uses_force(docker_adapter, stub):
+    calls = []
+    volume = stub.volumes.create('vol-s00', labels={'app': 'tutorlm-instance'})
+    volume.remove = lambda force=False: calls.append(force)
+    assert docker_adapter.remove_volume('vol-s00') is True
+    assert calls == [False]
+
+
 class _StubContainer:
     def __init__(self, name: str, labels: dict[str, str] | None = None) -> None:
         self.name = name

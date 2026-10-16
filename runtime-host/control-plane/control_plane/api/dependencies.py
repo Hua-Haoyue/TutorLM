@@ -8,8 +8,10 @@ from fastapi import Request
 
 from control_plane.allocator import Allocator
 from control_plane.config import ControlPlaneConfig
+from control_plane.invitations import InvitationService
 from control_plane.lifecycle import SlotLifecycle
 from control_plane.ports import RuntimeAdapter
+from control_plane.sharing import ShareService
 from control_plane.store import ControlPlaneStore
 
 
@@ -35,3 +37,11 @@ def get_allocator(request: Request) -> Allocator:
 
 def get_state(request: Request) -> Any:
     return request.app.state
+
+
+def get_invitations(request: Request) -> InvitationService:
+    return request.app.state.invitations
+
+
+def get_sharing(request: Request) -> ShareService:
+    return request.app.state.sharing

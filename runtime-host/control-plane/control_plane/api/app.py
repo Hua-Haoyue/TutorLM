@@ -15,11 +15,14 @@ from fastapi import FastAPI
 
 from control_plane.allocator import Allocator
 from control_plane.api.errors import register_error_handlers
-from control_plane.api.routers import admin, health, leases
+from control_plane.api.routers import admin, health, invitations, leases, pages, workspaces
 from control_plane.config import ControlPlaneConfig
+from control_plane.invitations import AccessPolicy, InvitationService
 from control_plane.lifecycle import SlotLifecycle
 from control_plane.runtime import build_adapter
+from control_plane.sharing import ShareService
 from control_plane.store import ControlPlaneStore
+from control_plane.workspaces import WorkspaceService
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +47,25 @@ def build_components(
     store.ensure_slots(config.slots)
     runtime = adapter if adapter is not None else build_adapter(config)
     lifecycle = SlotLifecycle(config, store, runtime)
+    workspace_service = WorkspaceService(config, store, runtime)
+
+    policy = AccessPolicy.from_config(config)
+    # 启动即 fail closed：非法配置里的系统码直接拒绝启动，而不是静默降级。
+    policy.validate_system_codes()
+    invitation_service = InvitationService(
+        store, pepper=_resolved_pepper(config, store), policy=policy
+    )
+    sharing_service = ShareService(
+        config, store, lifecycle, runtime, invitation_service
+    )
+
     allocator = Allocator(
         config,
         store,
         lifecycle,
         activity_probe=activity_probe,
+        workspace_service=workspace_service,
+        invitations=invitation_service,
         **({"clock": clock} if clock is not None else {}),
     )
     return {
@@ -57,7 +74,21 @@ def build_components(
         "adapter": runtime,
         "lifecycle": lifecycle,
         "allocator": allocator,
+        'workspaces': workspace_service,
+        'invitations': invitation_service,
+        'sharing': sharing_service,
     }
+
+
+def _resolved_pepper(config: ControlPlaneConfig, store: ControlPlaneStore) -> str:
+    """令牌盐：配置优先，否则持久化一个随机值（重启后仍能验证旧令牌）。"""
+
+    from control_plane.security import generate_token
+
+    configured = config.token_pepper.strip()
+    if configured:
+        return configured
+    return store.get_or_create_meta('token_pepper', generate_token(24))
 
 
 def create_app(
@@ -66,10 +97,11 @@ def create_app(
     adapter: Any | None = None,
     activity_probe: Any | None = None,
     run_startup_tasks: bool = True,
+    clock: Any | None = None,
 ) -> FastAPI:
     resolved = config or ControlPlaneConfig.from_env()
     components = build_components(
-        resolved, adapter=adapter, activity_probe=activity_probe
+        resolved, adapter=adapter, activity_probe=activity_probe, clock=clock
     )
 
     @asynccontextmanager
@@ -85,6 +117,22 @@ def create_app(
                     logger.warning("对账发现并隔离了槽位：%s", report["quarantined"])
             except Exception:  # noqa: BLE001 - 对账失败不应阻止启动
                 logger.exception("启动对账失败")
+
+            # 注入配置里的系统码（幂等，不复活已撤销的码）。
+            try:
+                seeded = components["invitations"].seed_configured_system_codes()
+                if seeded.get("seeded"):
+                    logger.info("已种入配置系统邀请码：%s", seeded)
+            except Exception:  # noqa: BLE001 - 非法配置已在构建时拒绝
+                logger.exception("种入系统邀请码失败")
+
+            # 处理上一次被中断的分享复制：源项目与源卷不动。
+            try:
+                copies = components["sharing"].reconcile()
+                if copies.get("cleaned"):
+                    logger.warning("已清理未完成的卷复制：%s", copies["cleaned"])
+            except Exception:  # noqa: BLE001
+                logger.exception("卷复制对账失败")
 
             if resolved.gc_enabled:
                 gc_thread = threading.Thread(
@@ -121,6 +169,9 @@ def create_app(
     app.include_router(leases.router)
     app.include_router(leases.admission_router)
     app.include_router(admin.router)
+    app.include_router(workspaces.router)
+    app.include_router(invitations.router)
+    app.include_router(pages.router)
     return app
 
 
@@ -130,7 +181,7 @@ def _gc_loop(allocator: Allocator, stop_event: threading.Event, interval: int) -
     while not stop_event.wait(max(1, int(interval))):
         try:
             report = allocator.gc_once()
-            if any(report.get(key) for key in ("expired", "reclaimed", "failed")):
+            if any(report.get(key) for key in ('expired', 'reclaimed', 'failed', 'workspaces_deleted', 'workspaces_failed')):
                 logger.info("GC 结果：%s", report)
         except Exception:  # noqa: BLE001
             logger.exception("GC 轮次失败")

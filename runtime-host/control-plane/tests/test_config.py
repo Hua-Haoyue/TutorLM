@@ -67,6 +67,9 @@ def test_empty_instance_env_suffix_is_ignored():
         ({"ready_timeout_seconds": 0}, "READY_TIMEOUT"),
         ({"lease_ttl_seconds": 0}, "LEASE_TTL"),
         ({"lease_idle_ttl_seconds": -1}, "LEASE_IDLE"),
+        ({'workspace_idle_ttl_seconds': 0}, 'WORKSPACE_IDLE_TTL'),
+        ({'page_heartbeat_timeout_seconds': 0}, 'PAGE_HEARTBEAT_TIMEOUT'),
+        ({'page_close_grace_seconds': -1}, 'PAGE_CLOSE_GRACE'),
         ({"instance_mount_path": "data"}, "MOUNT_PATH"),
         ({"container_prefix": ""}, "CONTAINER_PREFIX"),
         ({"volume_prefix": ""}, "VOLUME_PREFIX"),
@@ -109,3 +112,12 @@ def test_describe_never_leaks_tokens():
 def test_with_overrides_rejects_unknown_fields():
     with pytest.raises(TypeError):
         ControlPlaneConfig().with_overrides(nonsense=1)
+
+
+def test_workspace_retention_and_volume_names():
+    config = ControlPlaneConfig.from_env({'CONTROL_PLANE_WORKSPACE_IDLE_TTL_SECONDS': '14400'})
+    assert config.workspace_idle_ttl_seconds == 14400
+    workspace_id = '00000000-0000-4000-8000-000000000001'
+    assert config.workspace_volume_name(workspace_id).endswith('workspace-00000000000040008000000000000001')
+    with pytest.raises(ValueError):
+        config.workspace_volume_name('../../arbitrary-volume')

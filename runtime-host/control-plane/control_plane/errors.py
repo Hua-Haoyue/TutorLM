@@ -107,6 +107,11 @@ class NotFound(ControlPlaneError):
     http_status = 404
 
 
+class WorkspaceExpired(ControlPlaneError):
+    code = 'workspace_expired'
+    http_status = 410
+
+
 class UntrustedUpstream(ControlPlaneError):
     """租约里的 upstream 与受控实例地址不一致。
 
@@ -116,3 +121,61 @@ class UntrustedUpstream(ControlPlaneError):
 
     code = "untrusted_upstream"
     http_status = 500
+class InvitationRequired(ControlPlaneError):
+    """配置为仅邀请码准入，但本次申请没有提供有效邀请码。"""
+
+    code = "invitation_required"
+    http_status = 403
+
+
+class InvalidInvitation(ControlPlaneError):
+    """邀请码无效、被撤销、越权或已过期。
+
+    对外一律使用同一个错误码，避免把"码是否存在"变成枚举 Oracle。
+    """
+
+    code = "invalid_invitation"
+    http_status = 403
+
+
+class InvitationRevoked(ControlPlaneError):
+    code = "invitation_revoked"
+    http_status = 403
+
+
+class InvitationExpired(ControlPlaneError):
+    code = "invitation_expired"
+    http_status = 410
+
+
+class InvitationConflict(ControlPlaneError):
+    """邀请码操作与当前状态冲突（并发撤销、重复导入等）。"""
+
+    code = "invitation_conflict"
+    http_status = 409
+
+
+class CopyInProgress(ControlPlaneError):
+    """同一源项目/分享码的复制操作正在进行，不能重复启动。"""
+
+    code = "copy_in_progress"
+    http_status = 409
+
+
+class WorkspaceCopyFailed(ControlPlaneError):
+    """卷复制失败。目标项目不可用，源项目与其卷保持原状。"""
+
+    code = "workspace_copy_failed"
+    http_status = 502
+class InvalidDataDirectory(ControlPlaneError):
+    """项目存储路径不符合规范（必须是 '.' 或 UUID 专属子目录）。"""
+
+    code = "invalid_data_directory"
+    http_status = 500
+
+
+class ShareSourceUnsupported(ControlPlaneError):
+    """源项目未声明 v3 内容布局，卷内可能含应用 session 凭证，拒绝分享复制。"""
+
+    code = "share_source_unsupported"
+    http_status = 409

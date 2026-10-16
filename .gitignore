@@ -7,6 +7,17 @@
 *.pem
 *.key
 
+# Local control-plane config files (may embed tokens/peppers). Only local
+# names are ignored; committed examples/templates stay tracked.
+config.toml
+config.local.toml
+config.*.local.toml
+control-plane.toml
+control-plane.local.toml
+*.local.toml
+!config.example.toml
+!*.example.toml
+
 # Python and test artifacts
 .venv/
 __pycache__/

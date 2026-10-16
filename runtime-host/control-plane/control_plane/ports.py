@@ -11,14 +11,16 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from control_plane.domain.models import WorkloadState
+from control_plane.errors import RuntimeUnavailable
 
 
 @dataclass(frozen=True, slots=True)
 class VolumeSpec:
-    """槽位专属数据卷。"""
+    """A durable workspace volume or an anonymous lease's temporary volume."""
 
     name: str
     labels: dict[str, str] = field(default_factory=dict)
+    must_exist: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +42,93 @@ class InstanceSpec:
     pids_limit: int | None = None
     tmpfs_size: str | None = None
     stop_grace_seconds: int = 30
+    volume_must_exist: bool = False
+
+
+def _normalize_relative_path(value: str, *, field: str) -> str:
+    """校验并规范化一个**严格相对**的卷内路径。
+
+    ``'.'`` 表示卷根；绝对路径、Windows 盘符与 ``..`` 一律拒绝，否则复制
+    就会越出被挂载的那棵子树，把整个卷当成隐含绑定。
+    """
+
+    if value is None:
+        raise RuntimeUnavailable(f'{field} 不能为空（复制整个卷请使用 "."）')
+    text = str(value).strip()
+    if not text:
+        raise RuntimeUnavailable(f'{field} 不能为空（复制整个卷请使用 "."）')
+    if text.startswith('/') or text.startswith('\\') or ':' in text:
+        raise RuntimeUnavailable(f'{field} 必须是严格相对路径，收到 {value!r}')
+    if '\x00' in text:
+        raise RuntimeUnavailable(f'{field} 含非法字符')
+    parts = [part for part in text.replace('\\', '/').split('/') if part not in ('', '.')]
+    if not parts:
+        return '.'
+    if any(part == '..' for part in parts):
+        raise RuntimeUnavailable(f'{field} 不得包含 ".."，收到 {value!r}')
+    return '/'.join(parts)
+
+
+@dataclass(frozen=True, slots=True)
+class VolumeCopySpec:
+    """Copy one directory subtree from an existing volume into a brand-new volume.
+
+    ``source`` must already exist and carry exactly the ownership labels the
+    caller supplies; ``destination`` must **not** exist yet, because this
+    operation never overwrites or merges into existing project data. Both
+    directories are strictly relative paths inside their volumes (``'.'`` =
+    the whole volume), so mounting a volume here does not implicitly bind the
+    entire volume as the project root.
+
+    ``exclude_paths`` are paths relative to ``source_directory`` that must not
+    be copied (for example stored session or credential files that must never
+    be cloned into the recipient's project).
+    ``exclude_names`` match exact file or directory basenames at any depth
+    inside that subtree; unlike ``exclude_paths``, they are not root-relative.
+    """
+
+    source: VolumeSpec
+    destination: VolumeSpec
+    source_directory: str = '.'
+    destination_directory: str = '.'
+    helper_image: str = ''
+    timeout_seconds: int = 120
+    exclude_paths: tuple[str, ...] = ()
+    exclude_names: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, 'source_directory',
+            _normalize_relative_path(self.source_directory, field='source_directory'),
+        )
+        object.__setattr__(
+            self, 'destination_directory',
+            _normalize_relative_path(self.destination_directory, field='destination_directory'),
+        )
+        object.__setattr__(
+            self, 'exclude_paths',
+            tuple(
+                _normalize_relative_path(item, field='exclude_paths')
+                for item in (self.exclude_paths or ())
+            ),
+        )
+        names = tuple(self.exclude_names)
+        for name in names:
+            if (
+                not isinstance(name, str) or not name.strip()
+                or name in {'.', '..'}
+                or any(char in name for char in ('/', '\\', ':', '\x00'))
+            ):
+                raise RuntimeUnavailable('exclude_names must contain nonempty single-segment names')
+        object.__setattr__(self, 'exclude_names', names)
+        if int(self.timeout_seconds) <= 0:
+            raise RuntimeUnavailable('timeout_seconds 必须为正数')
+        if not self.source.labels:
+            raise RuntimeUnavailable('源卷必须带归属标签')
+        if not self.destination.labels:
+            raise RuntimeUnavailable('目标卷必须带归属标签')
+        if self.source.name == self.destination.name:
+            raise RuntimeUnavailable('源卷与目标卷不能是同一个卷')
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +173,15 @@ class RuntimeAdapter(Protocol):
 
     def remove_volume(self, name: str) -> bool:
         """删除卷；返回 ``True`` 表示本次确实删除了。幂等。"""
+
+
+    def copy_volume(self, spec: VolumeCopySpec) -> None:
+        """把一个卷中的目录子树复制到一个**全新**卷；失败抛 RuntimeUnavailable。
+
+        目标卷必须不存在（绝不覆盖既有项目数据）。复制在受限的临时 helper
+        容器里完成，结束后一定被停止并删除；失败的回滚与清理结果都必须暴露
+        出来，不得静默吞掉。
+        """
 
     def create(self, spec: InstanceSpec) -> RuntimeStatus:
         """创建容器（不启动）。"""
