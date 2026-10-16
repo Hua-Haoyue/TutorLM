@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tutorlm-control-plane"
+version = "0.1.0"
+description = "TutorLM 多实例控制面：访客租约、固定槽位分配与容器生命周期"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.30,<1",
+    "pydantic>=2.8,<3",
+    "httpx>=0.27,<1",
+    "docker>=7.1,<8",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+
+[tool.setuptools.packages.find]
+include = ["control_plane*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "docker: 需要真实 Docker daemon 的集成测试（本地默认跳过）",
+]

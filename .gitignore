@@ -1,0 +1,31 @@
+/reference/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python and test artifacts
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Runtime data and delivery artifacts
+var/
+.tutorlm-host/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.tar
+*.tar.gz
+
+# Frontend build artifacts
+node_modules/
+dist/
+coverage/

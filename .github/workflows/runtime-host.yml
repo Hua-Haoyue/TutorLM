@@ -1,0 +1,25 @@
+name: Runtime Host
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  control-plane:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r runtime-host/control-plane/requirements-dev.txt
+      - run: python scripts/check-boundaries.py
+      - run: python -m pytest runtime-host/control-plane/tests -q
+      - name: Validate outer Compose configuration
+        env:
+          TUTORLM_FRONTEND_DIR: ../../instance-app/frontend
+          TUTORLM_INSTANCE_IMAGE: tutorlm-app:contract-check-only
+          TUTORLM_CP_ADMIN_TOKEN: ci-config-only-admin
+          TUTORLM_CP_TOKEN_PEPPER: ci-config-only-pepper
+          TUTORLM_INVITE_CODE: ci-config-only-invite
+        run: docker compose -f runtime-host/deploy/compose.yml config --quiet

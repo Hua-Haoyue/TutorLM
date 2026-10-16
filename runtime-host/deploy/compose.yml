@@ -1,0 +1,71 @@
+name: ${TUTORLM_STACK_NAME:-tutorlm-local}
+
+services:
+  gateway:
+    image: nginx:1.27-alpine
+    ports:
+      - "${TUTORLM_EDGE_BIND:-127.0.0.1}:${TUTORLM_EDGE_PORT:-47823}:80"
+    volumes:
+      - ../gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${TUTORLM_FRONTEND_DIR:?Set TUTORLM_FRONTEND_DIR to built application frontend}:/usr/share/nginx/html:ro
+    depends_on:
+      control-plane:
+        condition: service_healthy
+    networks: [edge]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 4s
+      retries: 3
+
+  control-plane:
+    image: tutorlm-control-plane:local
+    build:
+      context: ../control-plane
+      dockerfile: ../deploy/Dockerfile.control-plane
+    # Access to the Docker socket is host-root-equivalent, even from a container.
+    user: "${TUTORLM_CP_USER:-0:0}"
+    ports:
+      - "127.0.0.1:${TUTORLM_CONTROL_PLANE_PORT:-47824}:8000"
+    environment:
+      CONTROL_PLANE_DB_PATH: /data/control-plane.sqlite3
+      CONTROL_PLANE_ADAPTER: docker
+      CONTROL_PLANE_SLOTS: ${TUTORLM_CP_SLOTS:-2}
+      CONTROL_PLANE_INSTANCE_IMAGE: ${TUTORLM_INSTANCE_IMAGE:?Set an existing application image}
+      CONTROL_PLANE_INSTANCE_PORT: 8000
+      CONTROL_PLANE_INSTANCE_MOUNT_PATH: /data
+      CONTROL_PLANE_NETWORK: ${TUTORLM_STACK_NAME:-tutorlm-local}-edge
+      CONTROL_PLANE_CONTAINER_PREFIX: ${TUTORLM_STACK_NAME:-tutorlm-local}-slot
+      CONTROL_PLANE_VOLUME_PREFIX: ${TUTORLM_STACK_NAME:-tutorlm-local}-slot-data-
+      CONTROL_PLANE_LABEL_KEY: tutorlm.pool
+      CONTROL_PLANE_LABEL_VALUE: ${TUTORLM_STACK_NAME:-tutorlm-local}
+      CONTROL_PLANE_ADMIN_TOKEN: ${TUTORLM_CP_ADMIN_TOKEN:?Set a random admin token}
+      CONTROL_PLANE_TOKEN_PEPPER: ${TUTORLM_CP_TOKEN_PEPPER:?Set a random token pepper}
+      CONTROL_PLANE_LEASE_COOKIE_SECURE: ${TUTORLM_CP_LEASE_COOKIE_SECURE:-false}
+      CONTROL_PLANE_LEASE_COOKIE_NAME: ${TUTORLM_STACK_NAME:-tutorlm-local}_lease
+      CONTROL_PLANE_LEASE_COOKIE_SAMESITE: lax
+      CONTROL_PLANE_MEM_LIMIT: ${TUTORLM_SLOT_MEM_LIMIT:-1536m}
+      CONTROL_PLANE_CPUS: ${TUTORLM_SLOT_CPUS:-1}
+      CONTROL_PLANE_INSTANCE_ENV_RUN_MODE: demo
+      CONTROL_PLANE_INSTANCE_ENV_INVITE_CODE: ${TUTORLM_INVITE_CODE:?Set the application invite code}
+      CONTROL_PLANE_INSTANCE_ENV_DATA_DIR: /data
+      CONTROL_PLANE_INSTANCE_ENV_PROVIDER: ${TUTORLM_PROVIDER:-fake}
+      CONTROL_PLANE_INSTANCE_ENV_MODEL_API_BASE: ${TUTORLM_MODEL_API_BASE:-}
+      CONTROL_PLANE_INSTANCE_ENV_MODEL_API_KEY: ${TUTORLM_MODEL_API_KEY:-}
+      CONTROL_PLANE_INSTANCE_ENV_MODEL_NAME: ${TUTORLM_MODEL_NAME:-}
+      CONTROL_PLANE_INSTANCE_ENV_MODEL_MAX_TOKENS: ${TUTORLM_MODEL_MAX_TOKENS:-1024}
+      CONTROL_PLANE_INSTANCE_ENV_MODEL_TIMEOUT_SECONDS: 60
+    volumes:
+      - control-plane-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [edge]
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+networks:
+  edge:
+    name: ${TUTORLM_STACK_NAME:-tutorlm-local}-edge
+
+volumes:
+  control-plane-data:
