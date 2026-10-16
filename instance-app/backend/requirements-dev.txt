@@ -1,0 +1,6 @@
+-r requirements.txt
+
+# 测试：pytest 运行用例；httpx 供 starlette/fastapi TestClient 驱动 ASGI 应用
+# （本仓库不依赖 httpx2，TestClient 直接用 httpx）。
+pytest>=8,<10
+httpx>=0.27,<1.0

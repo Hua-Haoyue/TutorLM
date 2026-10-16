@@ -1,4 +1,5 @@
 /reference/
+/sync/
 
 # Local configuration and credentials
 .env

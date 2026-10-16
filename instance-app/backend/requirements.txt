@@ -1,0 +1,18 @@
+# 容器内运行时依赖。
+#
+# 应用 HTTP 层（backend/adapters/http、backend/host）基于 FastAPI/Starlette + Pydantic，
+# 运行入口 backend/__main__.py 用 uvicorn 提供服务。版本范围取当前已验证组合的兼容区间，
+# 上游约束：fastapi>=0.46 需要 starlette>=0.46.0、pydantic>=2.9.0。
+#
+# 存储用标准库 sqlite3，模型调用用标准库 urllib，故除 HTTP 栈外无额外业务依赖。
+
+fastapi>=0.115,<1.0
+starlette>=0.46,<2.0
+pydantic>=2.9,<3.0
+uvicorn>=0.30,<1.0
+
+# pdf 文本抽取的真实后端（`backend/infrastructure/format/pdf.py` 的 pypdf 装载路径）。
+# pypdf 为纯 Python 实现、无原生扩展；未安装时抽取端口 `available()` 为 False，
+# 上层 fail closed（`extractor_unavailable`），绝不把 pdf 二进制按 utf-8 解码当文本。
+# 版本区间取当前已在仓库 .venv 验证过的 6.x。
+pypdf>=6.21,<7.0

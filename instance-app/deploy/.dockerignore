@@ -1,0 +1,62 @@
+# Build-context exclusions for instance-app/deploy/Dockerfile
+# (build context is the repository root: `docker build -f instance-app/deploy/Dockerfile .`).
+#
+# The application image carries only in-container application code. Everything that
+# belongs to the outer boundary, to local development, or that must never be
+# committed or shipped is excluded here.
+
+# Never ship secrets, credentials or local environment files.
+.env
+.env.*
+*.env
+*.pem
+*.key
+credentials*
+secrets*
+
+# Never ship databases, archives or local runtime state.
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+*.tar
+*.tar.gz
+*.tgz
+
+# The reference snapshot is a control-plane snapshot: never packaged.
+reference/
+
+# Outer runtime host and sync tooling are separate ownership boundaries.
+runtime-host/
+sync/
+contracts/
+
+# Local development and tooling state.
+.git/
+.gitignore
+.gitattributes
+.github/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+node_modules/
+dist/
+build/
+
+# Local scratch and recorded run data.
+var/
+
+# Tests and docs are not part of the runtime image.
+**/tests/
+**/*.test.js
+docs/
+README.md
+AGENTS.md
+
+# Editor and OS noise.
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

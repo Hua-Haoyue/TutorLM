@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tutorlm-instance-app"
+version = "0.1.0"
+description = "TutorLM 容器内应用后端：领域、存储与运行基础"
+requires-python = ">=3.11"
+dependencies = [
+    'fastapi>=0.115,<1.0',
+    'starlette>=0.46,<2.0',
+    'pydantic>=2.9,<3.0',
+    'uvicorn>=0.30,<1.0',
+    'pypdf>=6.21,<7.0',
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+# pdf 文本抽取的真实后端（infrastructure/format/pdf.py 的 pypdf 装载路径）。
+# 运行时镜像经 requirements.txt 安装；此可选组让 pyproject 侧也能表达同一能力，
+# 未安装时抽取端口 fail closed（extractor_unavailable），绝不把二进制当文本解码。
+pdf = ["pypdf>=6.21,<7.0"]
+
+[tool.setuptools.packages.find]
+where = [".."]
+include = ["backend*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "docker: 需要真实 Docker daemon 的集成测试（本地默认跳过）",
+    "network: 需要出网的测试（本地默认跳过）",
+]

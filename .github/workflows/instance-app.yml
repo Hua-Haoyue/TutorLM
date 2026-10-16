@@ -1,0 +1,49 @@
+name: Instance App
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  # The in-container application backend. Kept in its own job/process so its
+  # `backend/tests` package never mixes with the control-plane `tests` package
+  # (different rootdir/conftest) in one pytest run.
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r instance-app/backend/requirements-dev.txt
+          python -m pip install pyflakes
+      - name: Lint (pyflakes)
+        run: python -m pyflakes instance-app/backend
+      - name: Backend tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}/instance-app
+        run: python -m pytest instance-app/backend/tests -q
+      - name: Ownership boundary check
+        run: python scripts/check-boundaries.py
+
+  # Frontend reader/lease modules run on Node. The PDF.js engine bridge imports the
+  # pinned, self-hosted `pdfjs-dist` build, so the committed lockfile is installed
+  # with `npm ci` (no network fetching of application images; plain npm registry).
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: instance-app/frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: instance-app/frontend
+        run: npm ci
+      - name: Frontend tests
+        working-directory: instance-app/frontend
+        run: node --test tests/*.test.js

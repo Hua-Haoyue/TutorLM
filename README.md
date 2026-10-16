@@ -37,17 +37,30 @@ node --test instance-app/frontend/tests/*.test.js
 `/docs` 可查看接口，`/control/capacity` 可查看容量。fake adapter 不会启动真实应用，
 因此这个模式用于独立开发调度逻辑，不提供学习工作台。
 
+容器内应用的**真实后端**用另一个脚本本地启动（loopback、离线 `fake` provider、数据/会话写到 `var/instance-app/`、不挂载真实持久卷、不启动付费模型）：
+
+```powershell
+.\scripts\dev-instance-app.ps1          # 127.0.0.1:8091；应用不提供 /docs，用 /health、/api/runtime
+.\scripts\dev-instance-app.ps1 -Help
+```
+
+依赖安装、测试与 CI 见 [instance-app/backend/README.md](instance-app/backend/README.md)；
+`.github/workflows/instance-app.yml` 分进程跑 backend（pip + pyflakes + pytest + 边界检查）与前端（`npm ci` + node）。
+
 控制面配置可用 TOML 文件叠加环境变量，见
 [docs/configuration.md](docs/configuration.md) 与仓库根的 `config.example.toml`；
 CLI 用法见 [docs/cli.md](docs/cli.md)。
 
 Docker 联调见 [runtime-host/deploy/README.md](runtime-host/deploy/README.md)。
-容器内业务应用与完整工作台尚未实现；现有前端模块（租约生命周期、邀请码入口）需在工作台中接入。
-不能将当前仓库视为完整应用交付物。
+容器内后端已可本地启动 HTTP Host，PDF 文本抽取与 PDF.js 桥接已实现（见 [instance-app/README.md](instance-app/README.md) 与[instance-app/backend/README.md](instance-app/backend/README.md)）。完整工作台仍未接线，TeX 安全执行器未提供（编译返回 503），managed 卷初始化、可信会话引导与克隆重绑尚待外层联调，不能视为完整上线交付物。
 
 ## 协作入口
 
 - [架构与责任边界](docs/architecture.md)
+- [容器内 Instance App 架构设计](docs/instance-app-design.md)
+- [容器内 Instance App API（契约草案）](docs/instance-app-api.md)
+- [文档阅读器（MD/PDF/TeX 共享设计）](docs/document-readers.md)
+- [TeX 编译执行安全设计](docs/tex-compilation-security.md)
 - [多人并行开发流程](docs/development.md)
 - [持久工作区、邀请码与分享](docs/workspaces.md)
 - [控制面配置](docs/configuration.md)

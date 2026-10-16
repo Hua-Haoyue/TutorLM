@@ -1,0 +1,22 @@
+# Allow only the application build inputs into this Dockerfile's context.
+**
+!instance-app/
+!instance-app/backend/
+!instance-app/backend/**
+!instance-app/frontend/
+!instance-app/frontend/assets/
+!instance-app/frontend/assets/**
+!instance-app/frontend/scripts/
+!instance-app/frontend/scripts/**
+!instance-app/frontend/package.json
+!instance-app/frontend/package-lock.json
+**/__pycache__/**
+**/tests/**
+**/.pytest_cache/**
+**/.env
+**/.env.*
+**/*.key
+**/*.pem
+**/*.sqlite3*
+**/*.db
+**/var/**

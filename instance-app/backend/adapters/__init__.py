@@ -1,0 +1,1 @@
+"""Adapters: HTTP (and, later, plugins). Routes only call Host services."""

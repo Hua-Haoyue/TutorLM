@@ -3,6 +3,13 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "node scripts/build-assets.mjs",
     "test": "node --test tests/*.test.js"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "dependencies": {
+    "pdfjs-dist": "6.4.299"
   }
 }

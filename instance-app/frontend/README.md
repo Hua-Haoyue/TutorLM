@@ -1,11 +1,12 @@
 # Frontend Lifecycle
 
-当前目录提供两个同源模块，尚未实现完整学习工作台，也没有登录页或静态站点：
+当前目录提供若干同源 ES 模块，尚未实现完整学习工作台，也没有登录页或静态站点：
 
 - `assets/lease-lifecycle.js`：页面生命周期与关闭通知；
-- `assets/invitation-entry.js`：邀请码入口表单（申请计算租约）。
+- `assets/invitation-entry.js`：邀请码入口表单（申请计算租约）；
+- `assets/reader-*.js`、`assets/*-reader.js`：文档阅读器适配器（见下）。
 
-完整工作台仍未提供，页面不会自动获得这些能力；二者都需要某个页面显式挂载或安装。
+完整工作台仍未提供，页面不会自动获得这些能力；各模块都需要某个页面显式挂载或安装。
 
 ## 邀请码入口
 
@@ -130,3 +131,33 @@ await presence.ready;
 接入细节见 `../../docs/workspaces.md`。
 
 测试无需安装第三方包：`node --test instance-app/frontend/tests/*.test.js`（仓库根执行）。
+
+## 文档阅读器适配器（新增，尚未接线）
+
+`docs/document-readers.md` 描述的 Reader 现以**浏览器端适配器模块**落地，供后续接入工作台；
+本次**未**改动 `lease-lifecycle.js` 与 `invitation-entry.js`，也**没有**把它们接进任何页面。
+
+| 模块 | 职责 |
+| --- | --- |
+| `assets/reader-errors.js` | 稳定 error code 表与 `readerError/isReaderError`（含 `tex_compile_unavailable`、`no_text_layer`、`pdf_engine_unavailable`）。 |
+| `assets/reader-events.js` | `on/emit` 事件总线，`on` 返回取消订阅；消费者回调抛错不污染阅读器状态。 |
+| `assets/reader-offsets.js` | 码点 ↔ UTF-16 精确换算；落在代理对中间的偏移**报错不四舍五入**。 |
+| `assets/reference-draft.js` | 统一 `ReferenceDraft`/`Selector` 构造与校验；pdf 单一 canon `normalized-cropbox-unrotated-top-left` + `pages[]`；tex-source `file` 必填。 |
+| `assets/markdown-reader.js` | md/txt：白名单渲染（raw HTML 转义、脚本/内联事件/外链图片阻断）、搜索、选区→**码点**锚点。 |
+| `assets/pdf-reader.js` | **注入式** PDF 引擎适配器；未注入引擎抛 `pdf_engine_unavailable`，不静默回退、不加载远端脚本。 |
+| `assets/tex-reader.js` | TeX 源码视图/编辑器元数据 + 编译产物阅读器（复用 PDF）；`compile()` 恒 `tex_compile_unavailable`。 |
+| `assets/reader-registry.js` | 按格式装配适配器与 `capabilities()`；**未**自动安装到任何页面。 |
+
+约束（与专文一致，不是已交付声明）：
+
+- **PDF 引擎显式注入**：`pdfjs-dist` 由 lockfile 固定，`pdfjs-engine.js` 将其桥接到 Reader；不在运行时加载 CDN。
+- **TeX 编译不可用且无 fallback**：本仓库无安全编译执行器，`compile()`/`compileTex()` 一律拒绝。
+- **PDF 坐标系只有一套**：未旋转 CropBox 归一化、原点左上；`rotation`/`cropbox_transform` 仅显示映射。
+- **扫描版不伪造文本**：无可提取文本页返回 `no_text_layer`，降级为显式 `whole-document` 草稿。
+- 适配器**头部/无 DOM**：产出 HTML 字符串、大纲、搜索命中与 `ReferenceDraft`；挂载与虚拟化属未来接线。
+
+先在本目录执行 `npm ci` 安装锁定依赖，再从仓库根执行 `node --test instance-app/frontend/tests/*.test.js`；
+阅读器用例见 `tests/test_readers.test.js`。
+
+`npm run build` 导出 `dist/assets` 和 `dist/static/pdfjs`（包含 worker、字体、CMaps、WASM 和许可）。
+这些资源供网关同源托管；此导出不是完整工作台页面。
