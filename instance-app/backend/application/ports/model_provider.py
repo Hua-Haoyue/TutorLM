@@ -65,6 +65,19 @@ class RetellRequest:
     children: tuple[dict, ...]
     profile: dict
     partial: bool = False
+    explanation_depth: int = 0
+    rewrite_policy: dict = field(default_factory=dict)
+    source_context: dict = field(default_factory=dict)
+    required_terms: tuple[str, ...] = ()
+    retry_feedback: str = ''
+    previous_response: str = ''
+    parent_original_text: str = ''
+
+
+@dataclass(frozen=True, slots=True)
+class CausalExtractionRequest:
+    items: tuple[dict, ...]
+    retry_feedback: str = ''
 
 
 @runtime_checkable
@@ -88,4 +101,7 @@ class ModelProvider(Protocol):
 
     def retell(self, request: RetellRequest) -> str:
         """Return structured retelling JSON; the workflow validates its shape."""
+
+    def extract_causal(self, request: CausalExtractionRequest) -> str:
+        """Compress explanations into causal payloads for upward rewriting."""
 
