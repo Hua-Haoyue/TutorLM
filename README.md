@@ -1,83 +1,192 @@
 # TutorLM
 
-容器外调度与容器内业务独立开发，通过版本化 HTTP 契约集成。
+面向长文档学习的可追溯工作台：在原文旁阅读、提问、拆解问题，并把理解过的内容组织成一张可以回到出处的知识图。
 
-```text
-runtime-host/                 容器外团队
-  control-plane/              用户、持久项目、邀请码准入、临时计算租约与测试
-  gateway/                    Nginx 网关
-  deploy/                     新结构下的外层部署入口
-instance-app/                 容器内团队，含前端租约生命周期与邀请码入口模块
-  backend/                    业务 API、Runtime Host、插件、任务、存储
-  frontend/                   通用 Reader、PDF.js、租约与邀请码模块
-  workbench/                  完整工作台页面、交互、样式与本地开发服务器
-  deploy/                     应用镜像构建归属
-contracts/                    两侧共享的版本化协议，不放共享业务实现
-docs/                         架构与协作流程
-scripts/                      本地开发与架构边界检查
-reference/                    本地参考材料，不纳入 Git
-```
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Instance App CI](https://github.com/namenotfound64/TutorLM/actions/workflows/instance-app.yml/badge.svg)](https://github.com/namenotfound64/TutorLM/actions/workflows/instance-app.yml)
+[![Runtime Host CI](https://github.com/namenotfound64/TutorLM/actions/workflows/runtime-host.yml/badge.svg)](https://github.com/namenotfound64/TutorLM/actions/workflows/runtime-host.yml)
 
-这里的“容器外”指相对于访客应用容器；控制面自身仍可以容器化部署。
-`backend/host` 属于 **instance-app**，不是外层调度服务。
+在阅读区选中原文，创建可追溯的解释节点；在节点之间建立关系，按根到叶整理知识图；用离线 Provider 本地开发，也可以接入 Gemini 或 OpenAI 兼容模型。
 
-## 本地开发
+[在线工作台](http://stellaron.link:47823/) · [快速开始](#快速开始) · [功能](#你可以做什么) · [文档格式](#多格式阅读) · [模型接入](#接入真实模型) · [开发测试](#测试与质量检查) · [文档入口](#文档入口)
 
-Python 3.11+，以下命令在仓库根目录执行：
+TutorLM 将浏览器工作台、容器内应用和容器外控制面分开。应用负责文档、节点、解释、任务、模型和存储；控制面负责用户、持久项目、邀请码、计算租约和实例生命周期。两侧通过版本化 HTTP 契约集成，不共享私有模块或数据库。
+
+## 你可以做什么
+
+### 原文旁提问
+
+导入 Markdown、TXT 或 PDF，选中一段文字生成知识节点。节点保存原文引用、文档版本和上下文，可以从右侧卡片返回原文对应位置。
+
+### 把一个问题拆成分支
+
+在解释中继续选词或选句，创建子节点。父子关系保留追问路径，后续解释可以沿着这棵树继续展开，而不是把问题和答案散落在聊天记录里。
+
+### 选择解释方式
+
+设置中可以选择默认、通俗、严谨、多举例、类比和引导式解释。严谨模式会要求模型说明上下文关系、前提条件以及原文省略的数学推导；通俗和类比模式使用分层的简化策略。
+
+### 整理知识图
+
+工作台支持缩放、平移、手动拖动和自动布局。自动布局按根到叶、从左到右排列节点，并通过动画展示位置变化。AI 关系梳理会先提出新增、修改或删除连线的建议，用户确认后才会写入。
+
+节点支持手动布局、撤销和恢复默认位置；在启用 `card-clear` 插件时，还可以框选或清空当前文档的卡片，并在有效期内撤销删除。Feynman 检查作为独立的服务端学习流程运行，不会把检查结果伪装成解释。
+
+### 编辑和清理学习卡片
+
+Markdown 视图支持按块原地编辑。编辑会形成新的文档版本，并同步移动可验证的文本来源；已有解释锚定的内容不能直接改写，避免节点悄悄指向错误原文。卡片支持放大、恢复默认位置、拖动撤销，以及框选删除、清空当前文档和撤销删除。
+
+### 优化解释和检查推理
+
+优化解释会读取父节点和已解释的子节点，只把本次新增理解合并到相关语句，保留原解释和历史版本。Feynman 检查以独立任务检查前提、推理方向和结论，不把检查过程当作普通解释写入知识卡片。
+
+### 多格式阅读
+
+| 格式 | 支持内容 | 边界 |
+| --- | --- | --- |
+| Markdown / TXT | 上传、版本、搜索、选区、来源定位、表格、列表、代码块、引用和 KaTeX 数学公式 | 原始 HTML 不执行，远程图片不加载 |
+| PDF | 原件保存、文本抽取、PDF.js 原页渲染、文本层、搜索、选区和高亮 | 扫描 PDF 没有 OCR |
+| TeX | 单文件和 ZIP 工程校验、源码 Reader、源码引用 | 安全编译执行器尚未交付，编译返回 503 |
+
+### 持久项目与分享
+
+接入控制面后，可以创建多个持久项目。分享使用一次性的字符串，接收者得到独立副本，不会共享源项目的卷或业务数据。分享码默认有效期为 **7 天**，可由控制面配置覆盖；撤销或过期后不能继续导入。计算租约结束会回收实例，但项目数据按控制面保留策略管理。
+
+### 插件与工作流
+
+当前应用内置 `documents`、`explanations`、`knowledge-narration` 和 `card-clear` 四个插件。主要工作流包括 `explanation.v1`、`graph_relations.v1`、`narration.v1` 和 `retelling.v1`；Feynman 检查和卡片清理由应用内服务及插件提供。插件是随镜像构建的可信代码，不是用于执行任意用户代码的沙箱。
+
+## 快速开始
+
+### 1. 准备环境
+
+要求 Python 3.11+、Node.js 22+。在仓库根目录执行：
 
 ```powershell
 python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r instance-app/backend/requirements-dev.txt
 .\.venv\Scripts\python.exe -m pip install -r runtime-host/control-plane/requirements-dev.txt
-.\.venv\Scripts\python.exe -m pytest runtime-host/control-plane/tests -q
-.\.venv\Scripts\python.exe scripts/check-boundaries.py
-node --test instance-app/frontend/tests/*.test.js
+Push-Location instance-app/frontend
+npm ci
+Pop-Location
+```
+
+### 2. 启动独立工作台
+
+独立模式不需要 Docker、模型密钥或远程服务，应用使用离线 `fake` provider：
+
+```powershell
+.\scripts\dev-instance-app.ps1
+```
+
+它会在 `127.0.0.1:8091` 启动应用后端。另开一个终端启动工作台：
+
+```powershell
+.\.venv\Scripts\python.exe instance-app/workbench/scripts/dev-server.py --port 8092 --api http://127.0.0.1:8091
+```
+
+打开 `http://127.0.0.1:8092/`，输入本地体验码 `TLM-DEV-LOCAL`。这个模式适合验证阅读、节点、解释和前端交互；离线回答不代表真实模型质量。
+
+### 3. 启动控制面开发模式
+
+如果只需要调度、租约和槽位逻辑：
+
+```powershell
 .\scripts\dev-runtime-host.ps1
 ```
 
-开发脚本在 `127.0.0.1:8090` 启动 fake adapter 的控制面，无需 Docker 或模型密钥。
-`/docs` 可查看接口，`/control/capacity` 可查看容量。fake adapter 不会启动真实应用，
-因此这个模式用于独立开发调度逻辑，不提供学习工作台。
+控制面默认监听 `127.0.0.1:8090`，使用 fake runtime adapter，不启动真实应用容器。
 
-容器内应用的**真实后端**用另一个脚本本地启动（loopback、离线 `fake` provider、数据/会话写到 `var/instance-app/`、不挂载真实持久卷、不启动付费模型）：
+## 接入真实模型
 
-```powershell
-.\scripts\dev-instance-app.ps1          # 127.0.0.1:8091；应用不提供 /docs，用 /health、/api/runtime
-.\scripts\dev-instance-app.ps1 -Help
+应用支持以下 Provider：
+
+| Provider | 说明 |
+| --- | --- |
+| `fake` | 离线、确定性结果，用于本地开发和回归 |
+| `openai_compatible` | OpenAI Chat Completions 兼容接口 |
+| `gemini` | Gemini 原生 `generateContent` 接口 |
+
+真实模型配置只应通过服务端环境变量提供：
+
+```text
+TUTORLM_PROVIDER=gemini
+TUTORLM_MODEL_API_BASE=<provider endpoint>
+TUTORLM_MODEL_API_KEY=<server-side secret>
+TUTORLM_MODEL_NAME=<provider model name>
+TUTORLM_MODEL_TIMEOUT_SECONDS=60
+TUTORLM_MODEL_MAX_TOKENS=1024
 ```
 
-依赖安装、测试与 CI 见 [instance-app/backend/README.md](instance-app/backend/README.md)；
-`.github/workflows/instance-app.yml` 分进程跑 backend（pip + pyflakes + pytest + 边界检查）与前端（`npm ci` + node）。
+`dev-instance-app.ps1` 会强制使用 `fake` 并清理继承的模型地址和密钥。真实模型请求可能产生费用，且模型输出仍需进行内容和数学正确性检查。
 
-控制面配置可用 TOML 文件叠加环境变量，见
-[docs/configuration.md](docs/configuration.md) 与仓库根的 `config.example.toml`；
-CLI 用法见 [docs/cli.md](docs/cli.md)。
+## 项目结构
 
-Docker 联调见 [runtime-host/deploy/README.md](runtime-host/deploy/README.md)。
-容器内后端与工作台已接通持久项目、系统邀请码、唯一字符串分享及受控应用会话引导，
-卷初始化与克隆重绑已通过本地隔离 Docker 联调；协议见 [v4](contracts/instance-runtime-v4.md)。
-PDF 文本抽取与 PDF.js 桥接已实现。TeX 安全执行器仍未提供（编译返回 503），
-公网 TLS、安全配置与生产环境验收需独立完成，不能把本地测试当作上线保证。
+```text
+runtime-host/
+  control-plane/       用户、项目、邀请码、租约、容量和 Docker 生命周期
+  gateway/              Nginx 同源入口和受控转发
+  deploy/               控制面与网关部署模板
+instance-app/
+  backend/              应用 API、Host、插件、任务、格式适配和存储
+  frontend/              PDF.js、Reader、租约生命周期和通用浏览器模块
+  workbench/             TutorLM 工作台页面、画布、阅读区和本地开发服务器
+  deploy/                应用镜像构建入口
+contracts/               外层与应用之间的版本化协议
+docs/                    架构、配置、API、Reader 和开发说明
+scripts/                 本地启动和边界检查
+```
 
-## 协作入口
+`runtime-host/` 和 `instance-app/` 是两个开发边界。`instance-app/backend/host` 属于应用容器内部，不是外层控制面。
 
-- [已实现功能总览与当前限制](docs/feature-status.md)
-- [工作台前端实现与启动](instance-app/workbench/README.md)
+## 测试与质量检查
 
-- [架构与责任边界](docs/architecture.md)
-- [容器内 Instance App 架构设计](docs/instance-app-design.md)
-- [容器内 Instance App API（契约草案）](docs/instance-app-api.md)
-- [文档阅读器（MD/PDF/TeX 共享设计）](docs/document-readers.md)
-- [TeX 编译执行安全设计](docs/tex-compilation-security.md)
-- [多人并行开发流程](docs/development.md)
-- [持久工作区、邀请码与分享](docs/workspaces.md)
-- [控制面配置](docs/configuration.md)
-- [控制面 CLI](docs/cli.md)
-- [实例运行协议 v1](contracts/instance-runtime-v1.md)
-- [持久实例协议 v2](contracts/instance-runtime-v2.md)
-- [持久实例协议 v3](contracts/instance-runtime-v3.md)
-- [受控会话、邀请码与分享协议 v4](contracts/instance-runtime-v4.md)
-- [网关与租约协议 v1](contracts/gateway-lease-v1.md)
-- [网关与租约协议 v2](contracts/gateway-lease-v2.md)
+控制面和应用后端应在不同 pytest 进程中运行：
 
-凭据、本地 `.env`、真实控制面配置文件、数据库、数据卷、日志和镜像不纳入版本控制。
-不提交或推送任何内容，直到维护者明确执行 Git 提交与推送。
+```powershell
+.\.venv\Scripts\python.exe -m pytest runtime-host/control-plane/tests -q
+.\.venv\Scripts\python.exe -m pytest instance-app/backend/tests -q
+node --test instance-app/frontend/tests/*.test.js
+node --test instance-app/workbench/scripts/test-access.cjs instance-app/workbench/scripts/test-workspace-view.cjs instance-app/workbench/scripts/test-markdown.cjs instance-app/workbench/scripts/test-explanation-preferences.cjs instance-app/workbench/scripts/test-graph-layout.cjs
+.\.venv\Scripts\python.exe scripts/check-boundaries.py
+```
+
+浏览器测试需要使用隔离的本地后端，不要对已有用户数据或生产服务运行测试。真实 Docker 集成测试必须显式开启，并使用隔离的本地资源。
+
+## 当前限制
+
+- 扫描 PDF OCR 尚未提供。
+- TeX 安全编译执行器尚未提供，编译请求不会回退到不受限 subprocess。
+- 当前任务接口使用轮询，不提供 HTTP SSE 或逐 token 流式回答。
+- 公共工作台的 TLS、Cookie 安全属性、容量规划和长期运行需要在实际部署环境中单独验收。
+- 代码中的本地测试通过不等于某个线上环境已经正确配置。
+- 真实模型调用可能产生费用；仓库测试默认不调用远程模型。
+- 关系梳理和布局只能在当前文档范围内工作；复杂或含环的图无法保证完全没有交叉。
+- Markdown 原地编辑目前以文本块为边界；复杂表格单元格、已绑定解释的内容和不可验证的跨版本来源不会被强行重写。
+
+## 部署说明
+
+控制面动态创建应用实例，Compose 不会静态列出所有用户容器。部署时需要同源提供工作台页面、Reader 模块、PDF.js 脚本、worker 和字体资源。应用镜像负责后端和通用静态资源，完整工作台页面由外层网关按部署方案提供。
+
+配置优先级为：内置默认值 → TOML 文件 → `CONTROL_PLANE_*` 环境变量 → 显式代码覆盖。详细配置见 [docs/configuration.md](docs/configuration.md)。
+
+不要把 `.env`、真实配置、凭据、数据库、卷、日志、镜像归档或 `reference/` 提交到 Git。
+
+## 文档入口
+
+| 主题 | 文档 |
+| --- | --- |
+| 已实现能力与当前限制 | [docs/feature-status.md](docs/feature-status.md) |
+| 工作台启动与浏览器测试 | [instance-app/workbench/README.md](instance-app/workbench/README.md) |
+| 架构与责任边界 | [docs/architecture.md](docs/architecture.md) |
+| 应用设计与 API | [docs/instance-app-design.md](docs/instance-app-design.md)、[docs/instance-app-api.md](docs/instance-app-api.md) |
+| 插件 SDK | [docs/plugin-sdk.md](docs/plugin-sdk.md) |
+| 文档 Reader | [docs/document-readers.md](docs/document-readers.md) |
+| 工作区、邀请与分享 | [docs/workspaces.md](docs/workspaces.md) |
+| 控制面配置与 CLI | [docs/configuration.md](docs/configuration.md)、[docs/cli.md](docs/cli.md) |
+| 多人协作流程 | [docs/development.md](docs/development.md) |
+| 运行契约 | [contracts/README.md](contracts/README.md) |
+
+## 许可证
+
+项目采用 [MIT License](LICENSE)。随仓库提供的第三方前端资源保留各自许可证，例如 [KaTeX](instance-app/workbench/assets/katex/LICENSE) 和 [markdown-it](instance-app/workbench/assets/markdown-it/LICENSE)。
