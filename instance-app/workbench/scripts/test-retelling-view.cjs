@@ -59,3 +59,22 @@ test('empty history is safe and equal timestamps preserve server ordering', () =
   context.S.history.node = [];
   assert.equal(context.currentPage(node), null);
 });
+
+test('repeated optimization switches to the first original, not the previous rewrite', () => {
+  const { context, node, original, retelling } = fixture();
+  const next = { ...retelling, id: 'next', created_at: '2026-10-17T03:00:00Z',
+    learning: { retelling: { base_explanation_id: retelling.id, original_explanation_id: original.id,
+      source_explanation_id: original.id } } };
+  context.S.history.node.unshift(next);
+  node.metadata.retelling_view = { explanation_id: next.id, original: true };
+  assert.equal(context.currentPage(node), original);
+});
+
+test('the stored original snapshot remains available after history is pruned', () => {
+  const { context, node, original, retelling } = fixture();
+  retelling.learning.retelling.original_explanation_id = original.id;
+  retelling.learning.retelling.original_explanation = original;
+  context.S.history.node = [retelling];
+  node.metadata.retelling_view = { explanation_id: retelling.id, original: true };
+  assert.equal(context.currentPage(node), original);
+});

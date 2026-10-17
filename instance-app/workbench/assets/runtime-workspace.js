@@ -1205,8 +1205,10 @@
   }
   function retellingVersions(n) {
     const latest = latestExplanation(n);
-    const sourceId = latest?.learning?.retelling?.source_explanation_id;
-    const original = sourceId && (S.history[n.id] || []).find((exp) => exp.id === sourceId);
+    const retelling = latest?.learning?.retelling;
+    const sourceId = retelling?.original_explanation_id || retelling?.source_explanation_id;
+    const original = sourceId && ((S.history[n.id] || []).find((exp) => exp.id === sourceId)
+      || (retelling?.original_explanation?.id === sourceId && retelling.original_explanation));
     return original ? { original, current: latest } : null;
   }
   function currentPage(n) {
@@ -1284,11 +1286,11 @@
         <button class="icon-btn" data-act="page-next" ${pi >= pages.length - 1 ? 'disabled' : ''} aria-label="下一版">${icon('chev-r')}</button></span>` : '';
     const kids = childrenOf(n.id).length;
     const retell = S.kinds.has('retelling') && page && kids ? `<button class="btn btn--sm" data-act="node-retell" ${run ? 'disabled' : ''}
-        title="把已解释的 ${kids} 个子节点串回这个父节点，生成一版回讲">${icon('narrate')}回讲</button>` : '';
+        title="结合 ${kids} 个子节点优化当前解释">${icon('narrate')}优化解释</button>` : '';
     const versions = retellingVersions(n);
     const showingOriginal = versions && page?.id === versions.original.id;
     const versionSwitch = versions ? `<button class="btn btn--sm" data-act="retelling-toggle" ${run ? 'disabled' : ''}
-        title="${showingOriginal ? '切换到回讲生成的新解释' : '切换到本次回讲前的原解释'}" aria-pressed="${!!showingOriginal}">
+        title="${showingOriginal ? '切换到优化后的新解释' : '切换到原解释'}" aria-pressed="${!!showingOriginal}">
         ${icon(showingOriginal ? 'arrow-r' : 'arrow-l')}${showingOriginal ? '查看新解释' : '查看原解释'}</button>` : '';
     const pageBody = page
       ? `<div class="xpl__body"><div class="answer" data-answer-node="${esc(n.id)}" data-exp="${esc(page.id)}">${answerHtml(n, page)}</div></div>${diagnosticHtml(n, page, run)}`
@@ -1719,7 +1721,7 @@
     if (profile.revision > 0) return true;
     const stage = await new Promise((res) => {
       modal({ title: '设置学习档案',
-        body: `<div style="display:grid;gap:12px"><p class="muted small" style="margin:0">回讲会按你的学习阶段组织讲法。档案保存在这个工作区的服务器上，只需设置一次。</p>
+        body: `<div style="display:grid;gap:12px"><p class="muted small" style="margin:0">优化解释会按你的学习阶段组织讲法。档案保存在这个工作区的服务器上，只需设置一次。</p>
           <label class="field"><span class="label">学习阶段</span><select class="input" id="lp-stage">
           ${Object.entries(STAGES).map(([k, v]) => `<option value="${k}" ${k === 'undergraduate' ? 'selected' : ''}>${v}</option>`).join('')}</select></label></div>`,
         actions: [{ label: '取消', run: (c) => { c(); res(null); } }, { label: '保存', primary: true, run: (c, r) => { const v = $('#lp-stage', r).value; c(); res(v); } }] });
@@ -1810,11 +1812,11 @@
       } });
       if (result.status === 'blocked') {
         const names = (result.blocked_child_ids || []).map((id) => nodeOf(id)?.title).filter(Boolean);
-        toast(`子节点还没有解释，先解释它们再回讲${names.length ? '：' + clip(names.join('、'), 60) : ''}`, { ms: 6000 });
+        toast(`子节点还没有解释，先解释它们再优化${names.length ? '：' + clip(names.join('、'), 60) : ''}`, { ms: 6000 });
         return;
       }
       await addExplanation(n, result.explanation, true);
-      toast(result.status === 'partial' ? `已生成部分回讲（${new Set([...(result.blocked_child_ids || []), ...(result.unresolved_descendant_ids || [])]).size} 个分支节点尚未解释）` : '已生成回讲');
+      toast(result.status === 'partial' ? `解释已优化（${new Set([...(result.blocked_child_ids || []), ...(result.unresolved_descendant_ids || [])]).size} 个分支节点尚未解释）` : '解释已优化');
     } finally {
       if (runId) markPageRun(runId, false);
       paintState();
