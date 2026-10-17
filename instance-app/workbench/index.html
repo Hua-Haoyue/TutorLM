@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TutorLM · 懂你意思</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Crect width=%2216%22 height=%2216%22 rx=%223%22 fill=%22%23111%22/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/site.css">
+<script>
+  /* Apply the saved/system theme before first paint to avoid a flash. */
+  (function () {
+    try {
+      var t = localStorage.getItem('tlm.theme');
+      if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', t);
+      var p = JSON.parse(localStorage.getItem('tlm.prefs') || '{}');
+      if (p.hl) document.documentElement.style.setProperty('--hl', p.hl);
+    } catch (e) { document.documentElement.setAttribute('data-theme', 'light'); }
+  })();
+</script>
+<style>
+  /* --- animated knowledge-tree demo (inside the showcase window) --- */
+  .tree { width: 100%; max-width: 760px; }
+  .tree svg { width: 100%; height: auto; display: block; overflow: visible; }
+  .tree rect { rx: 3px; }
+  .tree { width:100%; max-width:720px; margin-left:auto; }
+  .tree svg { width:100%; height:auto; display:block; overflow:visible; }
+  .tree .edge { stroke:var(--ink); stroke-width:1.3; fill:none; opacity:.45; stroke-dasharray:var(--len); stroke-dashoffset:var(--len); animation:grow 1.0s var(--ease) forwards; }
+  .tree .gnode { opacity:0; animation:pop .5s var(--ease) forwards; }
+  .tree .gnode rect { fill:var(--white); stroke:var(--line); }
+  .tree .gnode.root rect { fill:var(--ink); stroke:var(--ink); }
+  .tree .gnode text { font:500 8px var(--mono); fill:var(--muted); }
+  .tree .gnode.root text { fill:var(--paper); font-size:9px; letter-spacing:.01em; }
+  @keyframes grow { to { stroke-dashoffset:0; } }
+  @keyframes pop { to { opacity:1; } }
+  .tree .postsel { opacity:0; animation:fadeIn .4s var(--ease) forwards; animation-delay:5.6s; }
+  .tree .postsel rect { fill:var(--ink); opacity:.16; }
+  .tree .bubble { opacity:0; transform:translateY(4px); animation:bubbleIn .45s var(--ease) forwards; animation-delay:6.1s; }
+  .tree .bubble .bg { fill:var(--white); stroke:var(--ink); }
+  .tree .bubble text { font:500 8px var(--sans); fill:var(--ink); }
+  .tree .bubble .pulse { fill:var(--ink); opacity:0; animation:pulseFlash .7s ease-out 2; animation-delay:6.7s; }
+  @keyframes bubbleIn { to { opacity:1; transform:none; } }
+  @keyframes pulseFlash { 0%{opacity:0;} 30%{opacity:.25;} 100%{opacity:0;} }
+  @keyframes fadeIn { to { opacity:1; } }
+  .tree .xedge { stroke:var(--ink); stroke-width:1.3; fill:none; stroke-dasharray:var(--len); stroke-dashoffset:var(--len); animation:grow 1.0s var(--ease) forwards; animation-delay:7.2s; }
+  .tree .xnode { opacity:0; animation:pop .6s var(--ease) forwards; animation-delay:7.9s; }
+  .tree .xnode rect { fill:var(--white); stroke:var(--ink); }
+  .tree .xnode .xh { fill:var(--ink); }
+  .tree .xnode .xt { font:600 8px var(--sans); fill:var(--paper); }
+  .tree .xnode .xb { font:400 8px var(--serif); fill:var(--ink-2); }
+  .tree .qmark { opacity:0; animation:pop .5s var(--ease) forwards; animation-delay:11.4s; }
+  .tree .qmark text { font:900 46px var(--sans); fill:var(--ink); }
+  .tree .yedge { stroke:var(--ink); stroke-width:1.3; fill:none; stroke-dasharray:var(--len); stroke-dashoffset:var(--len); animation:grow 0.9s var(--ease) forwards; animation-delay:11.8s; }
+  .tree .ynode { opacity:0; animation:pop .6s var(--ease) forwards; animation-delay:12.3s; }
+  .tree .ynode rect { fill:var(--white); stroke:var(--ink); }
+  .tree .ynode .yh { fill:var(--ink); }
+  .tree .ynode .yt { font:600 8px var(--sans); fill:var(--paper); }
+  .tree .ynode .yb { font:400 8px var(--serif); fill:var(--ink-2); }
+  .tree .dedge { stroke:var(--ink); stroke-width:1.3; fill:none; stroke-dasharray:var(--len); stroke-dashoffset:var(--len); animation:grow 0.9s var(--ease) forwards; animation-delay:13.5s; }
+  .tree .dnode { opacity:0; animation:pop .6s var(--ease) forwards; animation-delay:14.1s; }
+  .tree .dnode rect { fill:var(--white); stroke:var(--ink); }
+  .tree .dnode .dh { fill:var(--ink); }
+  .tree .dnode .dt { font:600 8px var(--sans); fill:var(--paper); }
+  .tree .dnode .db { font:400 8px var(--serif); fill:var(--ink-2); }
+  .tree .crosslink { stroke:var(--ink); stroke-width:1.2; fill:none; stroke-dasharray:var(--len); stroke-dashoffset:var(--len); animation:grow 1.1s var(--ease) forwards; animation-delay:15.9s; }
+  .tree .crosslink-head { fill:var(--ink); opacity:0; animation:pop .3s var(--ease) forwards; animation-delay:17.15s; }
+  .tree .quip-bubble { opacity:0; transform-box:fill-box; transform-origin:bottom right; animation:quipBurst .55s cubic-bezier(.2,1.6,.35,1) forwards; animation-delay:17.4s; }
+  .tree .quip-bubble rect { fill:var(--white); stroke:var(--ink); stroke-width:1.3; }
+  .tree .quip-bubble .tail { fill:var(--white); stroke:var(--ink); stroke-width:1.3; }
+  .tree .quip-bubble text { font:700 11px var(--sans); fill:var(--ink); letter-spacing:.02em; }
+    .tree { margin:0 auto; }
+  @keyframes quipBurst {
+    0%   { opacity:0; transform:scale(.2) rotate(-8deg); }
+    45%  { opacity:1; transform:scale(1.18) rotate(2deg); }
+    70%  { transform:scale(.94) rotate(-1deg); }
+    100% { opacity:1; transform:scale(1) rotate(0); }
+  }
+  /* Boot sequence (lease starting) */
+  .boot { list-style:none; padding:0; margin:0; }
+  .boot li { display:grid; grid-template-columns:28px 1fr auto; align-items:center; padding:10px 0; border-top:1px solid var(--line); color:var(--faint); }
+  .boot li:last-child { border-bottom:1px solid var(--line); }
+  .boot li.run { color:var(--ink); }
+  .boot li.done { color:var(--ink-2); }
+  .boot .dot { width:8px; height:8px; border:1px solid currentColor; }
+  .boot li.run .dot { background:currentColor; animation:blink 1s steps(2) infinite; }
+  .boot li.done .dot { background:currentColor; }
+  @keyframes blink { 50% { opacity:.2; } }
+  .boot .dot { border-radius: 50%; }
+</style>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="logo" href="index.html"><b>T</b>TutorLM</a>
+    <a class="nav__link" href="how.html">工作方式</a>
+    <a class="nav__link" href="terms.html">试用条款</a>
+    <a class="nav__link" href="design.html">设计文档</a>
+    <button class="icon-btn theme-btn" id="theme-btn" type="button" title="日间 / 夜间" aria-label="切换日间夜间模式"><svg class="ic"><use href="#i-moon"/></svg></button>
+    <a class="btn btn--primary" href="#start-here">开始试用</a>
+  </div>
+</header>
+
+<section class="cover" aria-label="封面">
+  <div class="cover__plate">
+    <img src="assets/cover.jpg" alt="TutorLM 封面">
+    <div class="cover__ph" hidden><strong>TutorLM</strong><span>封面图片位置 · assets/cover.jpg</span></div>
+    <a class="cover__hint" href="#start-here">向下滚动<svg class="ic"><use href="#i-chev-d"/></svg></a>
+  </div>
+</section>
+
+<div class="page">
+<main>
+  <section class="hero" id="start-here">
+    <div class="wrap">
+      <div>
+        <h1 class="title" aria-label="TutorLM 懂你意思">
+          <span class="l1" aria-hidden="true"><span class="ch" style="animation-delay:0.15s">T</span><span class="ch" style="animation-delay:0.24s">u</span><span class="ch" style="animation-delay:0.33s">t</span><span class="ch" style="animation-delay:0.42s">o</span><span class="ch" style="animation-delay:0.51s">r</span><span class="ch" style="animation-delay:0.60s">L</span><span class="ch" style="animation-delay:0.69s">M</span></span>
+          <span class="l2" aria-hidden="true"><span class="ch" style="animation-delay:0.85s">懂</span><span class="ch" style="animation-delay:0.99s">你</span><span class="ch" style="animation-delay:1.13s">意</span><span class="ch" style="animation-delay:1.27s">思</span></span>
+        </h1>
+      </div>
+      <div>
+        <p class="quip">书，越读越薄；树，越长越茂。</p>
+        <p class="lede">把 Markdown 与文本资料变成一棵可追溯的知识树。选中任意一段即可提问，回答长在原文旁边，越问越深，最后一键串讲成讲稿。</p>
+        <form class="gate" id="gate" novalidate>
+          <div class="gate__fields">
+            <label class="field" id="invite-field" hidden>
+              <span class="label">应用体验码</span>
+              <input class="input" id="invite" type="password" autocomplete="off" spellcheck="false" placeholder="主办方提供的体验码">
+            </label>
+            <label class="field" id="share-field">
+              <span class="label">分享码（可选）</span>
+              <input class="input" id="share-code-input" type="text" autocomplete="off" spellcheck="false" placeholder="打开别人分享的笔记">
+            </label>
+          </div>
+          <p class="gate__msg" id="gate-msg" role="alert" aria-live="assertive"></p>
+          <div class="cta">
+            <button class="btn btn--primary btn--lg" id="start" type="submit">开始试用 <svg class="ic"><use href="#i-arrow-r"/></svg></button>
+            <button class="btn btn--lg" id="resume" type="button" hidden>继续上次试用 · <span id="resume-left" class="mono">--:--</span></button>
+            <a class="btn btn--ghost btn--lg" href="how.html">了解工作方式</a>
+          </div>
+        </form>
+        <div class="cap-line" aria-live="polite">
+          <span id="cap-label">当前可用工作区</span>
+          <span class="cap__num"><span id="cap-free">–</span> <small id="cap-of">/ <span id="cap-total">–</span></small></span>
+          <span class="bar" id="cap-bar" aria-hidden="true"></span>
+          <span id="cap-meta">正在读取容量…</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="showcase" aria-label="演示">
+    <div class="wrap">
+      <div class="plate">
+        <div class="showcase__text">
+          <span class="card__idx">演示 · 一次真实的提问</span>
+          <h2>从一段原文，<br>长出一棵树。</h2>
+          <p>选中不懂的地方，答案长成新的叶子；在答案里再圈一个词，树就再长一层，最后串起来就是一份讲稿。</p>
+          <ol class="legend">
+            <li><span>01</span>读到不懂处，圈出这一段</li>
+            <li><span>02</span>选中「Scaled Dot」，点击解释</li>
+            <li><span>03</span>在解释里继续追问，换个说法</li>
+            <li><span>04</span>跨分支相连，豁然开朗</li>
+          </ol>
+        </div>
+        <div class="showcase__stage">
+          <div class="window" role="img" aria-label="知识树与解释演示动画">
+            <div class="window__bar"><i></i><i></i><i></i><span>attention.md · 知识图</span>
+              <button class="icon-btn" type="button" data-replay title="重新播放" aria-label="重新播放演示"><svg class="ic"><use href="#i-refresh"/></svg></button></div>
+            <div class="window__body">
+              <div class="tree">
+          <svg viewBox="0 0 560 400" aria-label="知识树与解释演示">
+            <defs><marker id="tree-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" fill="var(--ink)"/></marker></defs>
+            <g>
+              <path class="edge" style="--len:126; animation-delay:2.35s" d="M168 45 L78 105"/>
+              <path class="edge" style="--len:126; animation-delay:2.53s" d="M168 45 L258 105"/>
+              <path class="edge" style="--len:90; animation-delay:2.71s" d="M78 127 L34 179"/>
+              <path class="edge" style="--len:90; animation-delay:2.89s" d="M78 127 L122 179"/>
+              <path class="edge" style="--len:89; animation-delay:3.07s" d="M258 127 L216 179"/>
+              <path class="edge" style="--len:89; animation-delay:3.25s" d="M258 127 L300 179"/>
+              <path class="edge" style="--len:70; animation-delay:3.43s" d="M34 201 L34 245"/>
+              <path class="edge" style="--len:70; animation-delay:3.61s" d="M34 267 L34 311"/>
+            </g>
+            <g class="gnode root" style="animation-delay:2.60s"><rect x="93" y="16" width="150" height="36"/><text x="168" y="34" text-anchor="middle"><tspan x="168" dy="-3">Attention Is All</tspan><tspan x="168" dy="11">You Need</tspan></text></g>
+            <g class="gnode" style="animation-delay:2.82s"><rect x="40" y="105" width="76" height="22"/><text x="78" y="116" text-anchor="middle"><tspan x="78" dy="3">Encoder</tspan></text></g>
+            <g class="gnode" style="animation-delay:3.04s"><rect x="220" y="105" width="76" height="22"/><text x="258" y="116" text-anchor="middle"><tspan x="258" dy="3">Decoder</tspan></text></g>
+            <g class="gnode" style="animation-delay:3.26s"><rect x="-4" y="179" width="76" height="22"/><text x="34" y="190" text-anchor="middle"><tspan x="34" dy="3">Self-Attn</tspan></text></g>
+            <g class="gnode" style="animation-delay:3.48s"><rect x="84" y="179" width="76" height="22"/><text x="122" y="190" text-anchor="middle"><tspan x="122" dy="3">Feed Fwd</tspan></text></g>
+            <g class="gnode" style="animation-delay:3.70s"><rect x="178" y="179" width="76" height="22"/><text x="216" y="190" text-anchor="middle"><tspan x="216" dy="3">Masked Attn</tspan></text></g>
+            <g class="gnode" style="animation-delay:3.92s"><rect x="262" y="179" width="76" height="22"/><text x="300" y="190" text-anchor="middle"><tspan x="300" dy="3">Feed Fwd</tspan></text></g>
+            <g class="gnode" style="animation-delay:4.14s"><rect x="-4" y="245" width="76" height="22"/><text x="34" y="256" text-anchor="middle"><tspan x="34" dy="3">Multi-Head</tspan></text></g>
+            <g class="gnode" style="animation-delay:4.36s"><rect x="-4" y="311" width="76" height="22"/><text x="34" y="322" text-anchor="middle"><tspan x="34" dy="3">Scaled Dot</tspan></text></g>
+            <g class="postsel"><rect x="4" y="315" width="60" height="14"/></g>
+            <g class="bubble">
+                <rect class="bg" x="78" y="298" width="66" height="20"/>
+                <rect class="pulse" x="78" y="298" width="66" height="20"/>
+                <text x="111" y="311" text-anchor="middle">✨ 解释</text>
+              </g>
+            <path class="xedge" style="--len:100" d="M72 322 C112 322, 128 322, 168 322"/>
+            <g class="xnode">
+              <rect x="168" y="285" width="190" height="74"/>
+              <rect class="xh" x="168" y="285" width="190" height="15"/>
+              <text class="xt" x="176" y="295">解释 · Scaled Dot</text>
+              <clipPath id="xc0"><rect x="176" y="303" height="10" width="0"><animate attributeName="width" from="0" to="121.5" begin="8.20s" dur="1.05s" fill="freeze"/></rect></clipPath><text class="xb" clip-path="url(#xc0)" x="176" y="311">把 Query 与 Key 点</text><clipPath id="xc1"><rect x="176" y="314" height="10" width="0"><animate attributeName="width" from="0" to="121.5" begin="8.80s" dur="1.05s" fill="freeze"/></rect></clipPath><text class="xb" clip-path="url(#xc1)" x="176" y="322">积后除以 √d 再 softm</text><clipPath id="xc2"><rect x="176" y="325" height="10" width="0"><animate attributeName="width" from="0" to="121.5" begin="9.40s" dur="1.05s" fill="freeze"/></rect></clipPath><text class="xb" clip-path="url(#xc2)" x="176" y="333">ax，再乘 Value——除以</text><clipPath id="xc3"><rect x="176" y="336" height="10" width="0"><animate attributeName="width" from="0" to="121.5" begin="10.00s" dur="1.05s" fill="freeze"/></rect></clipPath><text class="xb" clip-path="url(#xc3)" x="176" y="344">维度的平方根是为了抑制内积过大</text><clipPath id="xc4"><rect x="176" y="347" height="10" width="0"><animate attributeName="width" from="0" to="64.8" begin="10.60s" dur="0.56s" fill="freeze"/></rect></clipPath><text class="xb" clip-path="url(#xc4)" x="176" y="355">导致的梯度消失。</text>
+            </g>
+            <g class="qmark"><text x="338" y="337" text-anchor="middle">?</text></g>
+            <path class="yedge" style="--len:46" d="M358 322 L400 322"/>
+            <g class="ynode">
+              <rect x="400" y="285" width="150" height="74"/>
+              <rect class="yh" x="400" y="285" width="150" height="15"/>
+              <text class="yt" x="408" y="295">例子 · 打比方</text>
+              <clipPath id="yc0"><rect x="408" y="303" height="10" width="0"><animate attributeName="width" from="0" to="98.8" begin="12.60s" dur="0.78s" fill="freeze"/></rect></clipPath><text class="yb" clip-path="url(#yc0)" x="408" y="311">像找同义词：先看它跟一堆词</text><clipPath id="yc1"><rect x="408" y="314" height="10" width="0"><animate attributeName="width" from="0" to="98.8" begin="13.10s" dur="0.78s" fill="freeze"/></rect></clipPath><text class="yb" clip-path="url(#yc1)" x="408" y="322">多像（Q·Kᵀ），除以 √</text><clipPath id="yc2"><rect x="408" y="325" height="10" width="0"><animate attributeName="width" from="0" to="98.8" begin="13.60s" dur="0.78s" fill="freeze"/></rect></clipPath><text class="yb" clip-path="url(#yc2)" x="408" y="333">d 免得分数爆表，再挑最像</text><clipPath id="yc3"><rect x="408" y="336" height="10" width="0"><animate attributeName="width" from="0" to="98.8" begin="14.10s" dur="0.78s" fill="freeze"/></rect></clipPath><text class="yb" clip-path="url(#yc3)" x="408" y="344">的（softmax），最后</text><clipPath id="yc4"><rect x="408" y="347" height="10" width="0"><animate attributeName="width" from="0" to="98.8" begin="14.60s" dur="0.78s" fill="freeze"/></rect></clipPath><text class="yb" clip-path="url(#yc4)" x="408" y="355">把含义加权揉一起（·V）。</text>
+            </g>
+            <path class="dedge" style="--len:112" d="M296 116 C336 116, 374 116, 404 116"/>
+            <g class="dnode">
+              <rect x="404" y="85" width="146" height="62"/>
+              <rect class="dh" x="404" y="85" width="146" height="15"/>
+              <text class="dt" x="412" y="95">解释 · Decoder</text>
+              <clipPath id="dc0"><rect x="412" y="103" height="10" width="0"><animate attributeName="width" from="0" to="91.2" begin="14.70s" dur="0.72s" fill="freeze"/></rect></clipPath><text class="db" clip-path="url(#dc0)" x="412" y="111">解码器一边看自己已写出的</text><clipPath id="dc1"><rect x="412" y="114" height="10" width="0"><animate attributeName="width" from="0" to="91.2" begin="15.20s" dur="0.72s" fill="freeze"/></rect></clipPath><text class="db" clip-path="url(#dc1)" x="412" y="122">部分（掩码自注意力），一</text><clipPath id="dc2"><rect x="412" y="125" height="10" width="0"><animate attributeName="width" from="0" to="91.2" begin="15.70s" dur="0.72s" fill="freeze"/></rect></clipPath><text class="db" clip-path="url(#dc2)" x="412" y="133">边通过交叉注意力参考编码</text><clipPath id="dc3"><rect x="412" y="136" height="10" width="0"><animate attributeName="width" from="0" to="91.2" begin="16.20s" dur="0.72s" fill="freeze"/></rect></clipPath><text class="db" clip-path="url(#dc3)" x="412" y="144">器的输出，逐词生成译文。</text>
+            </g>
+            <path class="crosslink" style="--len:200" d="M528 141 C554 171, 554 298, 528 328"/>
+                <path class="crosslink-head" d="M528 328 L530.87 318.58 L536.92 323.82 Z"/>
+            <g class="quip-bubble">
+              <path class="tail" d="M480 230 L496 230 L498 245 Z"/>
+              <rect x="404" y="196" width="96" height="34" rx="2"/>
+              <text x="452" y="218" text-anchor="middle">我悟了！</text>
+            </g>
+          </svg>
+        </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="how" style="padding-top:24px">
+    <div class="wrap">
+      <div class="section__head">
+        <h2>读到哪里，<br>问到哪里。</h2>
+        <p>不需要先整理笔记。打开资料直接读，遇到问题就地提问，TutorLM 帮你把零散的问答长成一张有结构、能回到原文的知识图。</p>
+      </div>
+      <div class="cards">
+        <article class="card"><svg class="ic"><use href="#i-upload"/></svg><span class="card__idx">01 · 导入</span><h3>放入你的资料</h3><p>导入 Markdown / TXT，或直接粘贴正文，在阅读区里边读边圈。</p></article>
+        <article class="card"><svg class="ic"><use href="#i-cursor"/></svg><span class="card__idx">02 · 选中</span><h3>选中即提问</h3><p>划选任意一段，输入疑问或直接「解释」。回答挂在原文旁，随时跳回出处。</p></article>
+        <article class="card"><svg class="ic"><use href="#i-narrate"/></svg><span class="card__idx">03 · 串讲</span><h3>整理成讲稿</h3><p>在解释里继续追问、优化解释，再按依赖顺序一键串讲，导出为 Markdown。</p></article>
+      </div>
+      <a class="more" href="how.html">完整的工作方式 <svg class="ic"><use href="#i-arrow-r"/></svg></a>
+    </div>
+  </section>
+
+  <section class="section" id="terms" style="padding-top:24px">
+    <div class="wrap">
+      <div class="section__head">
+        <h2>试用之前，<br>先说清楚。</h2>
+        <p>匿名使用，每位访客独占一个隔离工作区。试用时长有限，到期或主动结束后工作区与数据会被删除；满载时不会让你无限排队。</p>
+      </div>
+      <a class="more" href="terms.html">阅读完整的试用条款 <svg class="ic"><use href="#i-arrow-r"/></svg></a>
+    </div>
+  </section>
+</main>
+</div>
+
+<footer class="site">
+  <div class="wrap">
+    <span>TutorLM · 懂你意思 · Techathon 2026</span>
+    <a href="how.html">工作方式</a><a href="terms.html">试用条款</a><a href="design.html">设计文档</a>
+    <span class="mono" id="deploy-mode" style="margin-left:auto"></span>
+  </div>
+</footer>
+
+<!-- Boot modal: shown while lease is 'starting' -->
+<div class="modal-backdrop" id="boot" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="boot-title">
+    <div class="modal__head">
+      <h2 class="modal__title" id="boot-title">正在准备你的工作区</h2>
+      <span class="mono muted" id="boot-lease"></span>
+    </div>
+    <div class="modal__body">
+      <ol class="boot" id="boot-steps">
+        <li data-k="alloc"><span class="dot"></span><span>分配隔离工作区</span><span class="mono" data-t></span></li>
+        <li data-k="start"><span class="dot"></span><span>启动实例</span><span class="mono" data-t></span></li>
+        <li data-k="ready"><span class="dot"></span><span>连接应用会话</span><span class="mono" data-t></span></li>
+      </ol>
+      <p class="muted" id="boot-msg" style="margin:16px 0 0;font-size:13px">通常需要几秒钟。</p>
+    </div>
+    <div class="modal__foot">
+      <button class="btn" id="boot-cancel">取消</button>
+    </div>
+  </div>
+</div>
+
+<script src="assets/common.js"></script>
+<script src="assets/api.js"></script>
+<script src="assets/entry.js"></script>
+<script src="assets/site.js"></script>
+</body>
+</html>

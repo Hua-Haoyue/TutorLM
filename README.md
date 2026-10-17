@@ -9,7 +9,8 @@ runtime-host/                 容器外团队
   deploy/                     新结构下的外层部署入口
 instance-app/                 容器内团队，含前端租约生命周期与邀请码入口模块
   backend/                    业务 API、Runtime Host、插件、任务、存储
-  frontend/                   学习工作台与浏览器端接入逻辑
+  frontend/                   通用 Reader、PDF.js、租约与邀请码模块
+  workbench/                  完整工作台页面、交互、样式与本地开发服务器
   deploy/                     应用镜像构建归属
 contracts/                    两侧共享的版本化协议，不放共享业务实现
 docs/                         架构与协作流程
@@ -55,6 +56,8 @@ Docker 联调见 [runtime-host/deploy/README.md](runtime-host/deploy/README.md)�
 容器内后端已可本地启动 HTTP Host，PDF 文本抽取与 PDF.js 桥接已实现（见 [instance-app/README.md](instance-app/README.md) 与[instance-app/backend/README.md](instance-app/backend/README.md)）。完整工作台仍未接线，TeX 安全执行器未提供（编译返回 503），managed 卷初始化、可信会话引导与克隆重绑尚待外层联调，不能视为完整上线交付物。
 
 ## 协作入口
+
+- [工作台前端实现与启动](instance-app/workbench/README.md)
 
 - [架构与责任边界](docs/architecture.md)
 - [容器内 Instance App 架构设计](docs/instance-app-design.md)

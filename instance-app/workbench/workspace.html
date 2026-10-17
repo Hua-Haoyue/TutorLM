@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TutorLM · 工作区</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Crect width=%2216%22 height=%2216%22 fill=%22%23111%22/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<script>
+  /* Apply the saved/system theme before first paint to avoid a flash. */
+  (function () {
+    try {
+      var t = localStorage.getItem('tlm.theme');
+      if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', t);
+    } catch (e) { document.documentElement.setAttribute('data-theme', 'light'); }
+  })();
+</script>
+<link rel="stylesheet" href="assets/workspace.css">
+<link rel="stylesheet" href="assets/runtime.css">
+<link rel="stylesheet" href="assets/frame.css">
+<link rel="stylesheet" href="assets/reader-pdf.css">
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- ============ Top bar ============ -->
+  <header class="topbar">
+    <a class="brand" href="index.html" title="返回首页"><b>T</b>TutorLM</a>
+    <button class="icon-btn prefs-btn" id="prefs-btn" title="偏好设置 (Ctrl+,)" aria-label="偏好设置" aria-haspopup="dialog"><svg class="ic"><use href="#i-settings"/></svg></button>
+    <span class="sep"></span>
+    <div class="menu-anchor">
+      <button class="ws-switch" id="ws-btn" aria-haspopup="menu" aria-expanded="false">
+        <svg class="ic"><use href="#i-folder"/></svg><span id="ws-name">—</span><svg class="ic muted"><use href="#i-chev-ud"/></svg>
+      </button>
+      <div class="menu" id="ws-menu" role="menu" hidden></div>
+    </div>
+
+    <div class="topbar__right">
+      <span class="ttl" id="ttl" title="试用剩余时间"><svg class="ic"><use href="#i-clock"/></svg><span id="ttl-v">--:--</span></span>
+      <div class="menu-anchor">
+        <button class="tb-btn" id="usage-btn" aria-haspopup="dialog" aria-expanded="false">
+          <span class="label">任务</span><span class="mono" id="usage-v">—</span><svg class="ic"><use href="#i-chev-d"/></svg>
+        </button>
+        <div class="menu menu--wide" id="usage-menu" hidden>
+          <div class="menu__section">
+            <div class="label">本次会话的任务</div>
+            <div class="usage-num"><span id="usage-big">0</span><small id="usage-cap"> 次</small></div>
+            <div class="meter"><i id="usage-meter"></i></div>
+          </div>
+          <dl class="kv">
+            <div><dt>文档</dt><dd id="usage-docs">—</dd></div>
+            <div><dt>模型</dt><dd id="usage-model">—</dd></div>
+            <div><dt>会话</dt><dd id="usage-session">—</dd></div>
+            <div><dt>租约</dt><dd id="usage-lease">—</dd></div>
+          </dl>
+          <div class="menu__foot"><button class="btn btn--sm" data-act="end-trial"><svg class="ic"><use href="#i-logout"/></svg>结束试用</button></div>
+        </div>
+      </div>
+      <button class="tb-btn" id="find-btn" title="命令面板 (Ctrl+K)"><svg class="ic"><use href="#i-search"/></svg><span class="mono">Ctrl K</span></button>
+      <button class="tb-btn" id="share-btn" title="分享这份笔记" aria-label="分享" aria-haspopup="dialog"><svg class="ic"><use href="#i-share"/></svg></button>
+      <div class="menu-anchor">
+        <button class="avatar" id="avatar-btn" aria-haspopup="menu" aria-expanded="false" title="访客">访</button>
+        <div class="menu menu--right" id="avatar-menu" role="menu" hidden>
+          <div class="menu__section"><div class="label">匿名访客</div><div class="mono muted" id="avatar-lease" style="margin-top:4px">—</div></div>
+          <button class="menu__item" role="menuitem" data-act="shortcuts">键盘快捷键</button>
+          <button class="menu__item" role="menuitem" data-act="end-trial">结束试用</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ Explorer ============ -->
+  <aside class="explorer" id="explorer" aria-label="资源管理器">
+    <div class="pane-head">
+      <span class="label">资源</span>
+      <div class="pane-head__tools">
+        <button class="icon-btn" data-act="import" title="导入 .md / .txt"><svg class="ic"><use href="#i-upload"/></svg></button>
+        <button class="icon-btn" data-act="new-file" title="新建文档（粘贴正文）"><svg class="ic"><use href="#i-file-plus"/></svg></button>
+        <button class="icon-btn" data-act="new-folder" title="新建文件夹"><svg class="ic"><use href="#i-folder-plus"/></svg></button>
+      </div>
+      <input type="file" id="file-input" accept=".md,.markdown,.txt,.pdf,.tex,.zip,text/markdown,text/plain,application/pdf" multiple hidden>
+    </div>
+    <div class="filter">
+      <svg class="ic"><use href="#i-search"/></svg>
+      <input id="filter" type="search" placeholder="筛选文件 (Ctrl+P)" aria-label="筛选文件">
+    </div>
+    <nav class="tree" id="tree" role="tree" aria-label="文件"></nav>
+    <div class="dropzone" id="dropzone" hidden>松开以导入文件</div>
+  </aside>
+
+  <div class="gutter" id="gutter-l" data-g="exp" role="separator" aria-orientation="vertical" aria-label="拖动调整资源栏宽度" tabindex="0"></div>
+
+  <!-- ============ Reader ============ -->
+  <section class="reader" id="reader" aria-label="阅读区">
+    <div class="pane-head toolbar">
+      <div class="seg" role="radiogroup" aria-label="视图">
+        <button role="radio" data-view="md" aria-checked="true">MD</button>
+        <button role="radio" data-view="raw" aria-checked="false">RAW</button>
+        <button role="radio" data-view="pdf" aria-checked="false">PDF</button>
+      </div>
+      <span class="vsep"></span>
+      <button class="icon-btn" data-tool="select" aria-pressed="true" title="选择后提问"><svg class="ic"><use href="#i-cursor"/></svg></button>
+      <button class="icon-btn" data-tool="highlight" aria-pressed="false" title="高亮（再次点击高亮可移除）"><svg class="ic"><use href="#i-marker"/></svg></button>
+      <button class="icon-btn" data-tool="draw" aria-pressed="false" title="自由绘图（Esc 退出）"><svg class="ic"><use href="#i-pen"/></svg></button>
+      <span class="vsep"></span>
+      <div class="menu-anchor">
+        <button class="icon-btn" id="outline-btn" title="大纲" aria-expanded="false"><svg class="ic"><use href="#i-list"/></svg></button>
+        <div class="menu" id="outline-menu" hidden></div>
+      </div>
+      <button class="icon-btn" id="focus-btn" title="专注阅读" aria-pressed="false"><svg class="ic"><use href="#i-expand"/></svg></button>
+      <span class="vsep"></span>
+      <div class="zoom-group" role="group" aria-label="正文字号">
+        <button class="icon-btn" id="doc-zoom-out" title="缩小字号"><svg class="ic"><use href="#i-minus"/></svg></button>
+        <button class="zoom-v mono" id="doc-zoom-v" title="恢复默认字号">100%</button>
+        <button class="icon-btn" id="doc-zoom-in" title="放大字号"><svg class="ic"><use href="#i-plus"/></svg></button>
+      </div>
+      <div class="toolbar__right split menu-anchor">
+        <button class="btn btn--primary btn--sm" data-act="export-md"><svg class="ic"><use href="#i-download"/></svg>导出</button>
+        <button class="btn btn--primary btn--sm split__caret" id="export-caret" aria-label="更多导出方式" aria-expanded="false"><svg class="ic"><use href="#i-chev-d"/></svg></button>
+        <div class="menu menu--right" id="export-menu" role="menu" hidden>
+          <button class="menu__item" role="menuitem" data-act="export-md">文档 + 节点笔记 <span class="mono muted">.md</span></button>
+          <button class="menu__item" role="menuitem" data-act="export-json">知识图 <span class="mono muted">.json</span></button>
+          <button class="menu__item" role="menuitem" data-act="print">打印 / 存为 PDF</button>
+        </div>
+      </div>
+    </div>
+    <div class="drawbar" id="drawbar" role="toolbar" aria-label="绘图" hidden>
+      <span class="label">画笔</span>
+      <div class="drawbar__pens" id="draw-pens" role="radiogroup" aria-label="画笔"></div>
+      <span class="vsep"></span>
+      <span class="label">颜色</span>
+      <div class="drawbar__colors" id="draw-colors" role="radiogroup" aria-label="颜色"></div>
+      <label class="swatch swatch--custom" role="radio" aria-checked="false" title="自定义颜色"><input type="color" id="draw-custom" aria-label="自定义颜色"></label>
+      <span class="vsep"></span>
+      <button class="icon-btn" data-act="ink-undo" title="撤销上一笔 (Ctrl+Z)"><svg class="ic"><use href="#i-undo"/></svg></button>
+      <button class="icon-btn" data-act="ink-clear" title="清除这个文档的绘图"><svg class="ic"><use href="#i-trash"/></svg></button>
+      <span class="drawbar__note mono muted" title="绘图不会上传到服务器，只保存在这个浏览器里">仅存本地</span>
+    </div>
+    <div class="findbar" id="findbar" hidden>
+      <svg class="ic"><use href="#i-search"/></svg>
+      <input id="find-input" aria-label="在文档中查找" placeholder="在文档中查找">
+      <span class="mono muted" id="find-count">0 / 0</span>
+      <button class="icon-btn" data-act="find-prev" title="上一个"><svg class="ic" style="transform:rotate(-90deg)"><use href="#i-chev-r"/></svg></button>
+      <button class="icon-btn" data-act="find-next" title="下一个"><svg class="ic" style="transform:rotate(90deg)"><use href="#i-chev-r"/></svg></button>
+      <button class="icon-btn" data-act="find-close" title="关闭 (Esc)"><svg class="ic"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="reader__scroll" id="reader-scroll">
+      <article class="sheet" id="sheet"></article>
+    </div>
+  </section>
+
+  <div class="gutter" id="gutter-r" data-g="canvas" role="separator" aria-orientation="vertical" aria-label="拖动调整知识图宽度" tabindex="0"></div>
+
+  <!-- ============ Canvas ============ -->
+  <section class="canvas" id="canvas" aria-label="知识图">
+    <div class="pane-head toolbar">
+      <button class="icon-btn" data-act="zoom-out" title="缩小"><svg class="ic"><use href="#i-minus"/></svg></button>
+      <button class="zoom-v mono" data-act="zoom-reset" id="zoom-v" title="重置为 100%">100%</button>
+      <button class="icon-btn" data-act="zoom-in" title="放大"><svg class="ic"><use href="#i-plus"/></svg></button>
+      <span class="vsep"></span>
+      <button class="icon-btn" data-act="fit" title="适应画布"><svg class="ic"><use href="#i-fit"/></svg></button>
+      <button class="icon-btn" data-act="auto-layout" title="按依赖层级自动排列"><svg class="ic"><use href="#i-layout"/></svg></button>
+      <span class="vsep"></span>
+      <button class="icon-btn" data-act="toggle-follow" id="follow-btn" aria-pressed="true" title="跟随阅读区滚动"><svg class="ic"><use href="#i-follow"/></svg></button>
+      <div class="toolbar__right"><span class="chip" id="graph-count">0 节点</span></div>
+    </div>
+    <div class="surface" id="surface">
+      <div class="world" id="world">
+        <svg class="edges" id="edges" aria-hidden="true">
+          <defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path class="arrowhead" d="M0 0L8 4L0 8z"/></marker></defs>
+          <g id="edge-g"></g>
+        </svg>
+        <div id="nodes"></div>
+      </div>
+      <div class="empty-canvas" id="empty-canvas" hidden>
+        <div class="mono muted">00 节点</div>
+        <p id="empty-canvas-msg">在左侧文档中选中一段文字，<br>点击「解释」生成第一个知识节点。</p>
+      </div>
+      <!-- Overview ruler: where nodes link back to the source, and how deep they go -->
+      <div class="minimap" id="minimap" aria-label="原文连线缩略条">
+        <div class="minimap__view" id="minimap-view"></div>
+        <div class="minimap__marks" id="minimap-marks"></div>
+      </div>
+      <!-- Inspector -->
+      <aside class="inspector" id="inspector" aria-label="检查器"></aside>
+    </div>
+  </section>
+
+  <!-- ============ Status bar ============ -->
+  <footer class="statusbar">
+    <span id="st-page" class="mono">第 1 页，共 1 页</span>
+    <span id="st-words" class="mono">0 字</span>
+    <span class="mono">UTF-8</span>
+    <span id="st-state" class="mono st-state">就绪</span>
+    <span class="statusbar__right">
+      <span id="st-section" class="mono muted"></span>
+      <button class="icon-btn icon-btn--xs" data-act="toggle-explorer" aria-pressed="true" title="显示 / 隐藏资源栏"><svg class="ic"><use href="#i-panel-l"/></svg></button>
+      <button class="icon-btn icon-btn--xs" data-act="toggle-canvas" aria-pressed="true" title="显示 / 隐藏知识图"><svg class="ic"><use href="#i-panel-r"/></svg></button>
+    </span>
+  </footer>
+</div>
+
+<!-- Cross-pane connectors: every source-derived node stays linked to its passage -->
+<svg class="connector" id="connector" aria-hidden="true"><g id="connector-g"></g></svg>
+
+<!-- Selection popover (linkage menu) -->
+<div class="ask" id="ask" role="dialog" aria-label="针对选中内容提问" hidden>
+  <div class="ask__quote" id="ask-quote"></div>
+  <form class="ask__form" id="ask-form">
+    <input class="input" id="ask-input" placeholder="输入疑问，或直接解释" autocomplete="off">
+    <button class="btn btn--primary btn--sm" type="submit"><svg class="ic"><use href="#i-sparkle"/></svg>解释</button>
+  </form>
+  <div class="ask__actions">
+    <button data-act="ask-extract" data-write><svg class="ic"><use href="#i-node"/></svg>提取节点</button>
+    <button data-act="ask-highlight" data-doc-only><svg class="ic"><use href="#i-marker"/></svg>高亮</button>
+    <button data-act="ask-copy"><svg class="ic"><use href="#i-copy"/></svg>复制</button>
+    <button data-act="ask-find" data-doc-only><svg class="ic"><use href="#i-search"/></svg>查找 <span class="mono muted" id="ask-hits"></span></button>
+  </div>
+  <div class="ask__foot"><span id="ask-src"></span><span>Esc 关闭</span></div>
+</div>
+
+<!-- Command palette -->
+<div class="modal-backdrop" id="palette" hidden>
+  <div class="modal palette" role="dialog" aria-modal="true" aria-label="命令面板">
+    <input class="palette__input" id="palette-input" placeholder="搜索命令、文件或节点" autocomplete="off" role="combobox" aria-controls="palette-list" aria-expanded="true">
+    <ul class="palette__list" id="palette-list" role="listbox"></ul>
+  </div>
+</div>
+
+<!-- Generic modal host -->
+<div id="modal-host"></div>
+
+<script src="assets/common.js"></script>
+<script src="assets/qrcode.min.js"></script>
+<script src="assets/api.js"></script>
+<script src="assets/ink.js"></script>
+<script src="assets/runtime-workspace.js"></script>
+</body>
+</html>

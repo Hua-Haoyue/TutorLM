@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>设计文档 · TutorLM</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Crect width=%2216%22 height=%2216%22 rx=%223%22 fill=%22%23111%22/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/site.css">
+<script>
+  (function () {
+    try {
+      var t = localStorage.getItem('tlm.theme');
+      if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', t);
+      var p = JSON.parse(localStorage.getItem('tlm.prefs') || '{}');
+      if (p.hl) document.documentElement.style.setProperty('--hl', p.hl);
+    } catch (e) { document.documentElement.setAttribute('data-theme', 'light'); }
+  })();
+</script>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="logo" href="index.html"><b>T</b>TutorLM</a>
+    <a class="nav__link" href="how.html">工作方式</a>
+    <a class="nav__link" href="terms.html">试用条款</a>
+    <a class="nav__link" href="design.html" aria-current="page">设计文档</a>
+    <button class="icon-btn theme-btn" id="theme-btn" type="button" title="日间 / 夜间" aria-label="切换日间夜间模式"><svg class="ic"><use href="#i-moon"/></svg></button>
+    <a class="btn btn--primary" href="index.html#start-here">开始试用</a>
+  </div>
+</header>
+<div class="page">
+<main class="wrap">
+  <section class="doc-hero">
+    <span class="eyebrow">设计文档 · Design</span>
+    <h1>纸面、墨色，<br>和一点圆角。</h1>
+    <p>TutorLM 的界面像一本可以对话的书：米黄纸面上的墨色文字，安静的发丝线，柔和的圆角。这里记录颜色、字体、形状和布局的约定。</p>
+  </section>
+  <div class="article">
+    <nav class="toc" aria-label="本页目录"><a href="#principles">原则</a><a href="#color">颜色</a><a href="#type">字体</a><a href="#shape">形状与层次</a><a href="#layout">工作区布局</a><a href="#a11y">可访问性</a></nav>
+    <article class="prose">
+      <h2 id="principles">原则</h2>
+<ul>
+  <li><b>文字是主体。</b>正文用衬线体，界面用无衬线体，编号和数据用等宽体。</li>
+  <li><b>黑色只给最重要的东西。</b>每屏最多一个黑色主按钮；选中和激活用反色表达。</li>
+  <li><b>柔和而克制。</b>控件和卡片使用圆角与轻阴影；分区仍以 1px 细线为主，不做装饰。</li>
+  <li><b>两种光线。</b>浅色是米黄纸面，深色是暖调墨纸，所有颜色通过同一组变量成对切换。</li>
+</ul>
+      <h2 id="color">颜色</h2>
+<p>色块数值实时读取当前主题，可用右上角按钮切换浅色 / 深色对比。</p><div class="swatches"><div class="swatch" data-var="--paper"><i></i><div><b>纸面</b><code></code></div></div><div class="swatch" data-var="--paper-2"><i></i><div><b>侧栏 / 凹槽</b><code></code></div></div><div class="swatch" data-var="--paper-3"><i></i><div><b>更深的凹陷</b><code></code></div></div><div class="swatch" data-var="--sheet"><i></i><div><b>阅读纸</b><code></code></div></div><div class="swatch" data-var="--white"><i></i><div><b>卡片 / 浮层</b><code></code></div></div><div class="swatch" data-var="--ink"><i></i><div><b>墨色</b><code></code></div></div><div class="swatch" data-var="--ink-2"><i></i><div><b>正文</b><code></code></div></div><div class="swatch" data-var="--muted"><i></i><div><b>次要文字</b><code></code></div></div><div class="swatch" data-var="--line"><i></i><div><b>分隔线</b><code></code></div></div><div class="swatch" data-var="--hl"><i></i><div><b>原文高亮（可在偏好设置中更换）</b><code></code></div></div></div>
+      <h2 id="type">字体</h2>
+<table>
+  <tr><th>角色</th><th>字体</th><th>规格</th></tr>
+  <tr><td>展示标题</td><td>Inter 300</td><td>56–104px，字距 0.02em</td></tr>
+  <tr><td>文章标题 / 引言</td><td>Newsreader</td><td>26–72px / 19–21px，行高 1.6</td></tr>
+  <tr><td>阅读正文</td><td>Newsreader</td><td>16.5px，行高 1.78，行宽 ≤ 760px</td></tr>
+  <tr><td>界面文字</td><td>Inter</td><td>13–15px</td></tr>
+  <tr><td>标签 / 编号</td><td>JetBrains Mono</td><td>10–12px，大写，等宽数字</td></tr>
+</table>
+      <h2 id="shape">形状与层次</h2>
+<div class="radii"><div style="border-radius:var(--r-xs)">4</div><div style="border-radius:var(--r-sm)">6</div><div style="border-radius:var(--r)">8</div><div style="border-radius:var(--r-md)">10</div><div style="border-radius:var(--r-lg)">14</div><div style="border-radius:var(--r-xl)">22</div></div>
+<p>按钮与输入框 8px，菜单与小卡片 10px，节点卡片与面板内框 10–14px，弹窗 14px，展示板 22px。阴影分三级：控件 <code>--shadow-1</code>，浮层与右键菜单 <code>--shadow-2</code>，弹窗 <code>--shadow-3</code>。</p>
+<div class="specimen"><button class="btn btn--primary">主按钮</button><button class="btn">次按钮</button><button class="btn btn--ghost">文字按钮</button><button class="btn btn--sm">小按钮</button><input class="input" style="width:220px" placeholder="输入框"><span class="chip">概念</span><span class="chip chip--ink">L1</span></div>
+      <h2 id="layout">工作区布局</h2>
+<p>工作区参考代码编辑器：外层是一圈纸色框架，资源栏、阅读区、知识图是三块圆角内框，之间的窄缝就是可以拖动的分隔条。标题栏只放标识、偏好设置、工作区切换和状态；状态栏在最底部。</p>
+<div class="frame-demo"><div>资源栏</div><div>阅读区</div><div>知识图 · 缩略条</div></div>
+<ul>
+  <li>右键菜单和选区工具条使用浅色浮层：白底、细边、轻阴影、10px 圆角。</li>
+  <li>节点卡片保持简洁：未选中只显示类型、标题和两行摘要；选中后展开解释页、对话和操作。</li>
+  <li>一个节点有多条连线时，出发点和到达点沿卡片边缘自上而下依次排开，不再挤在同一点。</li>
+  <li>知识图右侧的缩略条参考编辑器滚动条上的错误 / 警告标记：每一格对应原文中的一个连线位置，颜色越深表示解释越深。</li>
+</ul>
+      <h2 id="a11y">可访问性</h2>
+<ul>
+  <li>图标按钮都有文字说明；切换类按钮使用 <code>aria-pressed</code>；弹窗有焦点陷阱，关闭后焦点归还。</li>
+  <li>正文与背景对比度满足 WCAG AA；系统开启「减少动态效果」时关闭动画。</li>
+  <li>以上为设计与实现层面的处理，完整合规仍需读屏软件人工测试。</li>
+</ul>
+    </article>
+  </div>
+</main>
+</div>
+<footer class="site">
+  <div class="wrap">
+    <span>TutorLM · 懂你意思 · Techathon 2026</span>
+    <a href="how.html">工作方式</a><a href="terms.html">试用条款</a><a href="design.html">设计文档</a>
+  </div>
+</footer>
+<script src="assets/common.js"></script>
+<script src="assets/site.js"></script>
+<script>
+  /* Paint swatch values from the live CSS variables so they follow the theme. */
+  (function () {
+    function paint() {
+      var cs = getComputedStyle(document.documentElement);
+      document.querySelectorAll('[data-var]').forEach(function (el) {
+        var v = cs.getPropertyValue(el.dataset.var).trim();
+        el.querySelector('i').style.background = 'var(' + el.dataset.var + ')';
+        el.querySelector('code').textContent = el.dataset.var + ' · ' + v;
+      });
+    }
+    paint();
+    new MutationObserver(paint).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  })();
+</script>
+</body>
+</html>

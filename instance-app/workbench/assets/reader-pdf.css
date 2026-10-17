@@ -1,0 +1,89 @@
+/* TutorLM v2 · PDF view, ink overlay and draw bar.
+   .textLayer rules are the subset of pdfjs-dist web/pdf_viewer.css (6.4.299) the
+   text layer needs; the page sets --total-scale-factor, --scale-round-* here. */
+
+/* ---------- PDF pages ---------- */
+.pdfv { display: grid; justify-content: center; gap: 18px; padding-bottom: 24px; }
+.pdfv-msg { text-align: center; padding: 48px 0; }
+.pdfv-page {
+  position: relative; background: #fff; overflow: hidden;
+  border: 1px solid var(--line); border-radius: var(--r-md, 6px); box-shadow: var(--shadow-1);
+  --scale-round-x: 1px; --scale-round-y: 1px;
+}
+.pdfv-page canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.pdfv-no { position: absolute; right: 10px; bottom: 6px; font-size: 10px; color: #8a8578; pointer-events: none; z-index: 2; }
+
+/* Overlay boxes: under the text layer so text stays selectable. */
+.pdfv-marks { position: absolute; inset: 0; pointer-events: none; }
+.pdfv-marks mark { position: absolute; padding: 0; color: transparent; border-radius: 2px; mix-blend-mode: multiply; }
+.pdfv-marks mark.anchor { background: var(--hl-soft); border-bottom: 1.5px solid var(--hl); }
+.pdfv-marks mark.anchor.on { background: var(--hl); box-shadow: 0 0 0 1.5px #1A1811; }
+.pdfv-marks mark.hl { background: var(--hl-soft); }
+.pdfv-marks mark.find { background: #E8C66A; box-shadow: 0 0 0 1.5px #1A1811; }
+.pdfv-marks mark.anchor.flash { animation: pdfv-flash 1.2s ease-out; }
+@keyframes pdfv-flash { 0%, 40% { box-shadow: 0 0 0 4px var(--hl); } 100% { box-shadow: none; } }
+
+.pdfv-page .textLayer {
+  position: absolute; inset: 0; overflow: clip; opacity: 1; line-height: 1; z-index: 0;
+  text-align: initial; letter-spacing: normal; word-spacing: normal; text-size-adjust: none;
+  forced-color-adjust: none; transform-origin: 0 0; caret-color: CanvasText;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+.pdfv-page .textLayer :is(span, br) {
+  color: transparent; position: absolute; white-space: pre; cursor: text;
+  transform-origin: 0% 0%; user-select: text;
+}
+.pdfv-page .textLayer > :not(.markedContent),
+.pdfv-page .textLayer .markedContent span:not(.markedContent) {
+  z-index: 1; --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1; --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.pdfv-page .textLayer .markedContent { display: contents; }
+.pdfv-page .textLayer ::selection { background: rgb(47 111 181 / .28); color: transparent; }
+.pdfv-page .textLayer br::selection { background: transparent; }
+.pdfv-page .textLayer .endOfContent { display: block; position: absolute; inset: 100% 0 0; z-index: 0; cursor: default; user-select: none; }
+.pdfv-page .textLayer.selecting .endOfContent { top: 0; }
+
+/* ---------- Ink ---------- */
+.sheet .doc { position: relative; }
+svg.ink { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 3; }
+svg.ink path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+svg.ink path.hi { mix-blend-mode: multiply; stroke-linecap: square; }
+:root[data-theme="dark"] .doc svg.ink path.hi { mix-blend-mode: screen; }
+.reader.tool-draw svg.ink { pointer-events: auto; cursor: crosshair; touch-action: none; }
+.reader.tool-draw.ink-erase svg.ink { cursor: cell; }
+.reader.tool-draw .doc, .reader.tool-draw .pdfv-page .textLayer { user-select: none; }
+
+/* ---------- Draw bar (second row of the reader's top bar) ---------- */
+.drawbar {
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap; flex: none;
+  min-height: 36px; padding: 4px 8px 4px 12px; border-bottom: 1px solid var(--line-soft, var(--line));
+  background: var(--paper);
+}
+.drawbar[hidden] { display: none; }
+.drawbar .label { margin-right: 2px; }
+.drawbar__pens, .drawbar__colors { display: flex; align-items: center; gap: 2px; }
+.drawbar .icon-btn[aria-checked="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.drawbar__colors.off { opacity: .45; }
+.swatch {
+  width: 22px; height: 22px; padding: 0; border: 1px solid var(--line); border-radius: 50%;
+  background: var(--paper); cursor: pointer; display: inline-grid; place-items: center; position: relative;
+}
+.swatch::after { content: ""; width: 14px; height: 14px; border-radius: 50%; background: var(--c, #000); }
+.swatch[aria-checked="true"] { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+.swatch:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.swatch--custom::after { background: conic-gradient(#C2402F, #E0A019, #2F8A57, #2F6FB5, #8A4FBF, #C2402F); }
+.swatch--custom[aria-checked="true"]::after { background: var(--c); }
+.swatch--custom input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; padding: 0; border: 0; }
+.drawbar__note { margin-left: auto; font-size: 10px; }
+@media (max-width: 700px) { .drawbar__note { display: none; } }
+
+/* The reader's top bar wraps instead of squeezing controls when the pane is narrow. */
+.reader > .pane-head { flex-wrap: wrap; height: auto; min-height: 40px; row-gap: 4px; padding-top: 4px; padding-bottom: 4px; }
+.reader > .pane-head .seg, .reader > .pane-head .icon-btn, .reader > .pane-head .zoom-group { flex: none; }
+.swatch::after { box-shadow: inset 0 0 0 1px rgb(127 127 127 / .45); }
+.drawbar__note { white-space: nowrap; }

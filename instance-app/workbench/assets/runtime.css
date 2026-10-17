@@ -1,0 +1,84 @@
+/* Workspace additions for the real-API build (loaded after workspace.css). */
+
+/* Reader: read-only source view */
+pre.raw { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; min-height: 0; }
+
+/* Explorer rows with a delete affordance */
+.t-item { display: flex; align-items: center; position: relative; }
+.t-item .t-row { flex: 1; min-width: 0; }
+.t-count { font-size: 10px; color: var(--faint); padding-left: 6px; }
+.t-row.active .t-count { color: var(--paper-3); }
+.t-del { position: absolute; right: 4px; width: 22px; height: 22px; opacity: 0; }
+.t-del .ic { width: 13px; height: 13px; }
+.t-item:hover .t-del, .t-del:focus-visible { opacity: 1; }
+.t-item:hover .t-count, .t-item:focus-within .t-count { visibility: hidden; }
+.t-item.active .t-del { color: var(--paper); }
+.t-item.active .t-del:hover { background: var(--on-ink-line); border-color: var(--on-ink-line); }
+
+/* Graph edges: explicit relations are dashed and labelled */
+.edges path.rel { stroke-dasharray: 4 3; }
+.edges .rel-label { font: 500 10px var(--mono); fill: var(--muted); paint-order: stroke; stroke: var(--paper-2); stroke-width: 3px; }
+
+/* Node cards */
+.gnode.sel { display: flex; flex-direction: column; max-height: min(640px, calc(100vh - 160px)); }
+.gnode__scroll { overflow: auto; min-height: 0; flex: 1; }
+.gnode__meta { margin-top: 6px; font-size: 10px; color: var(--muted); }
+.gnode .gen { justify-content: flex-start; }
+.gnode .gen .btn { height: 22px; padding: 0 8px; font-size: 11px; }
+.note-text { width: 100%; min-height: 72px; max-height: 240px; resize: vertical; border: 1px solid var(--line-soft); background: var(--sheet); padding: 8px; font: 400 13px/1.6 var(--sans); color: var(--ink-2); outline: none; }
+.note-text:focus { border-color: var(--ink); background: var(--white); }
+.gnode .edit-bar { border: 0; padding: 4px 0 0; }
+.disc__q { font-size: 12px; margin-bottom: 4px; }
+.disc__q b { font-weight: 600; margin-right: 4px; }
+.answer { font-size: 12.5px; line-height: 1.6; color: var(--ink-2); user-select: text; overflow-wrap: anywhere; }
+.answer h2, .answer h3 { font: 600 12.5px var(--sans); margin: 6px 0 4px; letter-spacing: 0; text-transform: none; border: 0; padding: 0; }
+.answer p, .answer ul, .answer ol { margin: 0 0 6px; }
+.answer ul, .answer ol { padding-left: 1.2em; }
+.answer code { font: .85em var(--mono); background: var(--paper-2); padding: 0 3px; }
+.answer .math { font-family: var(--serif); font-style: italic; }
+.disc__by { font-size: 10px; margin-top: 4px; }
+.disc__list { max-height: none; }
+.disc__empty { font-size: 12px; margin: 0 0 8px; }
+.gnode__foot { display: flex; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--line-soft); background: var(--sheet); }
+
+/* Inspector */
+.kind-select { border: 1px solid var(--line); background: var(--white); font-size: 12px; height: 22px; border-radius: 0; }
+.rel-list { list-style: none; margin: 0; padding: 0 12px 8px; }
+.rel-list li { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line-soft); font-size: 12px; }
+.rel-list .mono { font-size: 10px; color: var(--muted); white-space: nowrap; }
+.rel-list .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rel-list .icon-btn { width: 20px; height: 20px; }
+.rel-list .icon-btn .ic { width: 12px; height: 12px; }
+.inspector { max-height: calc(100% - 24px); overflow: auto; }
+
+/* Modals used by the workspace */
+.gate__msg { min-height: 0; margin: 0; font-size: 13px; color: var(--ink); }
+.gate__msg:empty { display: none; }
+.nd-text { height: auto; min-height: 240px; padding: 10px 12px; font: 400 13px/1.6 var(--mono); resize: vertical; }
+select.input { appearance: auto; }
+.narr__list { max-height: 46vh; overflow: auto; }
+.narr__list input:disabled { opacity: .35; cursor: not-allowed; }
+
+@media (max-width: 700px) {
+  html, body { height: auto; overflow: auto; }
+  .app, .app.no-explorer, .app.no-canvas, .app.no-explorer.no-canvas, .app.focus {
+    height: auto; min-height: 100dvh; display: flex; flex-direction: column;
+  }
+  .topbar { min-height: 44px; flex-wrap: wrap; padding: 8px; gap: 6px; }
+  .topbar .sep, #usage-btn .label, #find-btn .mono { display: none; }
+  .ws-switch { max-width: 140px; }
+  #ws-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .explorer { max-height: 170px; min-height: 100px; }
+  .reader { min-height: 360px; max-height: 70dvh; }
+  .reader__scroll { padding: 16px; }
+  .reader .toolbar { flex-wrap: wrap; height: auto; min-height: 40px; }
+  .canvas { min-height: 560px; height: 75dvh; flex: none; }
+  .sheet, .sheet p, .sheet pre { overflow-wrap: anywhere; }
+  .statusbar { min-height: 28px; flex-wrap: wrap; gap: 6px; }
+  .app.no-explorer .explorer, .app.focus .explorer, .app.no-canvas .canvas, .app.focus .canvas { display: none; }
+  .inspector { right: 4px; bottom: 4px; width: 220px; max-height: 45%; }
+  .ask { max-width: calc(100vw - 16px); }
+  .narr { grid-template-columns: 1fr; }
+  .narr > div + div { padding-left: 0 !important; margin-top: 12px; }
+  .gnode.sel { width: min(332px, calc(100vw - 32px)); }
+}

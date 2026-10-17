@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>试用条款 · TutorLM</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Crect width=%2216%22 height=%2216%22 rx=%223%22 fill=%22%23111%22/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/tokens.css">
+<link rel="stylesheet" href="assets/site.css">
+<script>
+  (function () {
+    try {
+      var t = localStorage.getItem('tlm.theme');
+      if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', t);
+      var p = JSON.parse(localStorage.getItem('tlm.prefs') || '{}');
+      if (p.hl) document.documentElement.style.setProperty('--hl', p.hl);
+    } catch (e) { document.documentElement.setAttribute('data-theme', 'light'); }
+  })();
+</script>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="logo" href="index.html"><b>T</b>TutorLM</a>
+    <a class="nav__link" href="how.html">工作方式</a>
+    <a class="nav__link" href="terms.html" aria-current="page">试用条款</a>
+    <a class="nav__link" href="design.html">设计文档</a>
+    <button class="icon-btn theme-btn" id="theme-btn" type="button" title="日间 / 夜间" aria-label="切换日间夜间模式"><svg class="ic"><use href="#i-moon"/></svg></button>
+    <a class="btn btn--primary" href="index.html#start-here">开始试用</a>
+  </div>
+</header>
+<div class="page">
+<main class="wrap">
+  <section class="doc-hero">
+    <span class="eyebrow">试用条款 · Terms</span>
+    <h1>试用之前，<br>先说清楚。</h1>
+    <p>这是一个比赛期间的试用版本。为了让每个人都能稳定地使用，我们对身份、时长、数据和容量做了以下约定。</p>
+  </section>
+  <div class="article">
+    <nav class="toc" aria-label="本页目录"><a href="#identity">匿名与体验码</a><a href="#time">试用时长</a><a href="#data">数据与删除</a><a href="#share">分享</a><a href="#capacity">满载与重试</a><a href="#model">关于模型回答</a><a href="#content">你上传的内容</a></nav>
+    <article class="prose">
+      <h2 id="identity">匿名与体验码</h2>
+<p>试用是匿名的，不需要注册账号。每位访客独占一个隔离的工作区。演示环境可能要求输入主办方提供的<b>应用体验码</b>；体验码只用于开启会话，不会和你的身份关联。</p>
+      <h2 id="time">试用时长</h2>
+<p>每次试用有时长上限，以工作区右上角的计时为准。剩余 5 分钟时会提醒你导出需要的内容。会话长时间无操作也可能被提前回收。</p>
+      <h2 id="data">数据与删除</h2>
+<ul>
+  <li>你导入的文档、生成的节点、解释和串讲都保存在你自己的工作区里。</li>
+  <li>试用到期或你主动点击「结束试用」后，工作区与其中的数据会被删除，<b>无法恢复</b>。</li>
+  <li>浏览器本地只保存界面偏好（主题、布局、视口位置等）和阅读高亮，不保存文档内容。</li>
+</ul>
+      <h2 id="share">分享</h2>
+<p>分享码对应工作区当前状态的一份副本。持有分享码的人可以兑换得到独立的副本；请只把分享码发给你信任的人。分享码可能有有效期，以生成时显示为准。</p>
+      <h2 id="capacity">满载与重试</h2>
+<p>同时在线的工作区数量有限。满载时我们不会让你无限排队，而是告诉你大约何时可以重试，并在空出位置后自动为你接入。</p>
+      <h2 id="model">关于模型回答</h2>
+<p>解释和串讲由模型生成，可能不准确，请结合原文判断。界面显示「演示模型」时，回答来自离线演示 Provider，只用于体验流程，不代表真实模型的质量。</p>
+      <h2 id="content">你上传的内容</h2>
+<p>请不要上传含有个人隐私、机密或你无权使用的资料。我们不会把你的内容用于试用以外的目的；试用结束后内容随工作区一起删除。</p>
+    </article>
+  </div>
+</main>
+</div>
+<footer class="site">
+  <div class="wrap">
+    <span>TutorLM · 懂你意思 · Techathon 2026</span>
+    <a href="how.html">工作方式</a><a href="terms.html">试用条款</a><a href="design.html">设计文档</a>
+  </div>
+</footer>
+<script src="assets/common.js"></script>
+<script src="assets/site.js"></script>
+
+</body>
+</html>
