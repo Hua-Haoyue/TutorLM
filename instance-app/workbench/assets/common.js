@@ -68,7 +68,8 @@
     'pen': '<path d="M13.5 3.5l3 3L7.5 15.5l-4 1 1-4z"/><path d="M11.5 5.5l3 3"/>',
     'brush': '<path d="M11 3.5l5.5 5.5-5 5L6 8.5z"/><path d="M6 8.5 3.5 16.5l8-2.5"/>',
     'highlighter': '<path d="M7 11.5 13.5 4l3 3L9 13.5z"/><path d="M7 11.5 4.5 16h3L9 13.5"/><path d="M11 16.5h5.5"/>',
-    'eraser': '<path d="M3.5 12.5 10.5 5.5l6 6-5 5h-4z"/><path d="M7 9l6 6M10.5 16.5h6"/>'
+    'eraser': '<path d="M3.5 12.5 10.5 5.5l6 6-5 5h-4z"/><path d="M7 9l6 6M10.5 16.5h6"/>',
+    'globe': '<circle cx="10" cy="10" r="6.5"/><path d="M3.5 10h13M10 3.5c-2.2 2.3-2.2 10.7 0 13M10 3.5c2.2 2.3 2.2 10.7 0 13"/>'
   };
 
   function injectSprite() {

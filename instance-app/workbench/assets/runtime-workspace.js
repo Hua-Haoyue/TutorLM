@@ -1494,10 +1494,17 @@
   const optimizingNodes = new Set();
   const feynmanKey = (n, exp) => `${S.project.id}:${n.id}:${exp.id}`;
   const feynmanEligible = (n, exp) => !n.parent_id && !!(exp?.learning?.feynman_eligible === true || exp?.learning?.retelling);
+  /* The entry button sits in the card's action row; the open quiz below it. */
+  function feynmanEntry(n, exp, run) {
+    if (!feynmanEligible(n, exp)) return '';
+    const state = feynmanStates.get(feynmanKey(n, exp));
+    if (state && !state.closed) return '';
+    return `<button class="btn btn--sm" data-act="node-feynman" ${run ? 'disabled' : ''}>${icon('check')}${state?.quiz?.state === 'correct' ? '已通过费曼验证' : '费曼验证'}</button>`;
+  }
   function feynmanHtml(n, exp, run) {
     if (!feynmanEligible(n, exp)) return '';
     const state = feynmanStates.get(feynmanKey(n, exp));
-    if (!state || state.closed) return `<div class="feynman-entry"><button class="btn btn--sm" data-act="node-feynman" ${run ? 'disabled' : ''}>${icon('check')}${state?.quiz?.state === 'correct' ? '已通过费曼验证' : '费曼验证'}</button></div>`;
+    if (!state || state.closed) return '';
     const close = `<div class="feynman-toolbar"><button type="button" class="icon-btn" data-act="node-feynman-close" title="关闭费曼验证" aria-label="关闭费曼验证">${icon('close')}</button></div>`;
     const q = state.quiz, busy = state.busy;
     const feedback = state.feedback ? `<div class="feynman-feedback" role="status"><strong>刚才的逻辑需要这样理解</strong><p>${esc(state.feedback.correction)}</p><blockquote>${esc(state.feedback.source_quote)}</blockquote></div>` : '';
@@ -1598,13 +1605,8 @@
         <button class="icon-btn" data-act="page-next" ${pi >= pages.length - 1 ? 'disabled' : ''} aria-label="下一版">${icon('chev-r')}</button></span>` : '';
     const kids = childrenOf(n.id).length;
     const canRetell = S.kinds.has('retelling') && page && kids;
-    const versions = retellingVersions(n);
-    const showingOriginal = versions && page?.id === versions.original.id;
-    const versionSwitch = versions ? `<button class="btn btn--sm" data-act="retelling-toggle" ${run ? 'disabled' : ''}
-        title="${showingOriginal ? '切换到优化后的新解释' : '切换到原解释'}" aria-pressed="${!!showingOriginal}">
-        ${icon(showingOriginal ? 'arrow-r' : 'arrow-l')}${showingOriginal ? '查看新解释' : '查看原解释'}</button>` : '';
     const pageBody = page
-      ? `${pager}<div class="xpl__body"><div class="answer" data-answer-node="${esc(n.id)}" data-exp="${esc(page.id)}">${answerHtml(n, page)}</div></div>`
+      ? `<div class="xpl__body"><div class="answer" data-answer-node="${esc(n.id)}" data-exp="${esc(page.id)}">${answerHtml(n, page)}</div></div>`
       : `<div class="xpl__empty"><span>${canExplain ? '还没有解释。' : '当前镜像未启用解释工作流。'}</span>${canExplain ? `<button class="btn btn--sm btn--primary" data-act="node-explain" ${run ? 'disabled' : ''}>${icon('sparkle')}生成解释</button>` : ''}</div>`;
     return `<div class="gnode sel ${m.status === 'mastered' ? 'mastered' : ''}" ${attrs} role="group" aria-label="知识节点：${esc(n.title)}">
       <div class="gnode__head">
@@ -1614,17 +1616,20 @@
         <button class="icon-btn" data-act="node-collapse" title="收起 (Esc)">${icon('close')}</button></div>
       <div class="gnode__scroll">
         <div class="gnode__body">
-          <h4 class="title-view md-inline" data-title-view tabindex="0" role="button" title="点击编辑标题" aria-label="节点标题：${esc(n.title)}，点击编辑">${nodeTitle(titleSource)}</h4>
-          <input class="title-input" data-title value="${esc(titleSource.length <= 200 ? titleSource : n.title)}" maxlength="200" aria-label="节点标题" hidden>
+          <div class="gnode__titlerow">
+            <h4 class="title-view md-inline" data-title-view tabindex="0" role="button" title="点击编辑标题" aria-label="节点标题：${esc(n.title)}，点击编辑">${nodeTitle(titleSource)}</h4>
+            <input class="title-input" data-title value="${esc(titleSource.length <= 200 ? titleSource : n.title)}" maxlength="200" aria-label="节点标题" hidden>
+            ${pager}</div>
         </div>
         <div class="xpl">
           ${run ? runLine(run) : ''}
           ${!run && ['failed', 'cancelled', 'interrupted'].includes(S.runs[n.id]?.state) ? '<p class="obstacle-error" role="alert">本次生成未完成，已保留上一份解释。可重新生成。</p>' : ''}
           ${pageBody}
           ${page || m.source?.fromNode ? `<div class="node-learning-actions">
+            ${feynmanEntry(n, page, run || optimizingNodes.has(n.id))}
             ${page && canExplain ? `<button class="btn btn--sm" data-act="node-explain" title="重新生成解释" ${run ? 'disabled' : ''}>${icon('sparkle')}重新生成</button>` : ''}
             ${page && canExplain ? `<button class="btn btn--sm" data-act="node-optimize" ${run || optimizingNodes.has(n.id) ? 'disabled' : ''}>${icon(canRetell ? 'narrate' : 'sparkle')}优化解释</button>` : ''}
-            ${versionSwitch}${m.source?.fromNode ? '<button class="btn btn--sm" data-act="node-parent">↑ 返回上层</button>' : ''}
+            ${m.source?.fromNode ? '<button class="btn btn--sm" data-act="node-parent">↑ 返回上层</button>' : ''}
           </div>` : ''}
           ${feynmanHtml(n, page, run || optimizingNodes.has(n.id))}
         </div>
@@ -1912,7 +1917,9 @@
     if (act === 'page-prev' || act === 'page-next') {
       const i = pageIndex(n) + (act === 'page-next' ? 1 : -1);
       if (i < 0 || i >= pagesOf(n).length) return;
-      n.metadata = { ...meta(n), page: i, pages: pagesOf(n).map((h) => h.id) };
+      // The pager is the only version control: it also replaces an older 原解释/新解释 choice.
+      const { retelling_view: _view, ...rest } = meta(n);
+      n.metadata = { ...rest, page: i, pages: pagesOf(n).map((h) => h.id) };
       renderNode(n.id);
       await patchMeta(n, {});
     }

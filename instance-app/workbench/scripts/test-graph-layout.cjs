@@ -42,10 +42,12 @@ test('same-rank endpoints reorder to uncross independent connections', () => {
   nonoverlapping(nodes, p);
 });
 
-test('dependencies order prerequisites first, symmetric edges do not invent ancestry', () => {
+test('prerequisites go right of what needs them, symmetric edges do not invent ancestry', () => {
   const nodes = [node('root'), node('child'), node('peer')];
   const p = layout(nodes, [edge('dep', 'child', 'root', 'depends_on'), edge('sym', 'child', 'peer', 'related_to')]);
-  assert(p.root.x < p.child.x);
+  assert(p.child.x < p.root.x, 'child needs root: root is its prerequisite, so it sits right');
+  const q = layout(nodes, [edge('pre', 'root', 'child', 'prerequisite_of')]);
+  assert(q.child.x < q.root.x, 'A prerequisite_of B puts A right of B');
   const independent = layout(nodes, [edge('sym', 'child', 'peer', 'contradicts')]);
   assert.equal(independent.child.x, independent.peer.x);
 });
@@ -85,7 +87,7 @@ test('empty graphs and the 80-node preview limit are supported', () => {
 test('layout exposes engine routes instead of discarding long-edge crossing reduction', () => {
   const nodes = [node('root'), node('a','root',1), node('b','root',2), node('leaf','a',3)];
   const p = layout(nodes, [edge('long','root','leaf')]);
-  assert(p.routes.length >= 4);
+  assert(p.routes.length >= 1);
   const route = p.routes.find(route => route.from === 'root' && route.to === 'leaf');
   assert(route.points.length >= 3);
   assert(route.points.every(point => Number.isFinite(point.x) && Number.isFinite(point.y)));
@@ -101,4 +103,40 @@ test('layout exposes engine routes instead of discarding long-edge crossing redu
       }
     }
   }
+});
+
+const circled = (id, start, extra = {}) => ({ id, parent_id: null, order_index: 0,
+  metadata: { source: { quote: id, selector: { type: 'text', start, end: start + 5 } }, ...extra } });
+
+test('circled concepts stay in the leftmost column, unless they are a prerequisite of another', () => {
+  const nodes = [circled('a', 10), circled('b', 50), circled('c', 90), node('child', 'a', 1)];
+  const p = layout(nodes, [edge('pre', 'c', 'b', 'prerequisite_of')]);
+  assert.equal(p.a.x, p.b.x, 'circled concepts share the document-side column');
+  assert(p.a.x < p.child.x);
+  assert(p.b.x < p.c.x, 'c is a prerequisite of b, so it moves right of b');
+  nonoverlapping(nodes, p);
+});
+
+test('the leftmost column follows the order of the circled text', () => {
+  const starts = [400, 20, 300, 120, 220];
+  const nodes = starts.map((start, i) => circled('n' + i, start));
+  // Children pull in the opposite direction; the document order still wins in column 0.
+  nodes.push(node('k0', 'n1', 9), node('k1', 'n0', 1));
+  const p = layout([...nodes].reverse(), []);
+  const byY = nodes.filter(n => n.id.startsWith('n')).sort((a, b) => p[a.id].y - p[b.id].y).map(n => n.metadata.source.selector.start);
+  assert.deepEqual(byY, [...starts].sort((a, b) => a - b));
+  nonoverlapping(nodes, p);
+});
+
+test('pdf selections are ordered by page, then by height on the page', () => {
+  const pdf = (id, page, y) => ({ id, parent_id: null, metadata: { source: { selector: { type: 'pdf', pages: [{ page, rects: [{ x: 0.1, y, w: 0.2, h: 0.02 }] }] } } } });
+  const nodes = [pdf('late', 2, 0.1), pdf('low', 1, 0.8), pdf('high', 1, 0.2)];
+  const p = layout(nodes, []);
+  assert(p.high.y < p.low.y && p.low.y < p.late.y);
+});
+
+test('a parent with several children is centred on them', () => {
+  const nodes = [node('r'), node('a', 'r', 1), node('b', 'r', 2), node('c', 'r', 3)];
+  const p = layout(nodes, []);
+  assert(Math.abs((p.r.y + 75) - (p.b.y + 75)) <= 2);
 });

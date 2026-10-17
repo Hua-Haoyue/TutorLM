@@ -20,6 +20,7 @@ const output = path.resolve(__dirname, '../.work/workspace-tools');
     await page.fill('#invite', process.env.APP_INVITE || 'TLM-DEV-LOCAL');
     await page.click('#start'); await page.waitForURL('**/workspace.html');
     await page.waitForFunction(() => window.TLM_WS?.state.project && window.TLM_WS.state.connected);
+    await page.waitForLoadState('networkidle');   // let the restored document open first
     await page.locator('#file-input').setInputFiles({ name:'agent-main.py', mimeType:'text/x-python',
       buffer:Buffer.from('def greet_user(name):\n    return "Hello " + name\n\nprint(greet_user("Reader"))\n') });
     await page.waitForSelector('.code-source .hljs-keyword');
@@ -85,7 +86,8 @@ const output = path.resolve(__dirname, '../.work/workspace-tools');
     await page.waitForFunction(() => window.TLM_WS.state.nodes.filter(n => n.document_id === window.TLM_WS.state.doc.id)
       .every(n => n.metadata.layout_routes));
     await page.waitForTimeout(700);
-    assert(await page.locator('#edge-g path[d*="L"]').count() >= 4, 'Automatic layout must render routed dependency paths');
+    // Only links that skip a column are routed (root → Store result); neighbours use curves.
+    assert(await page.locator('#edge-g path[d*="L"]').count() >= 1, 'Automatic layout must render routed long links');
     await page.screenshot({path:path.join(output,'layout.png')});
     await page.click('#workspace-chat-toggle');
     const panel = page.locator('#workspace-chat'); await panel.waitFor();

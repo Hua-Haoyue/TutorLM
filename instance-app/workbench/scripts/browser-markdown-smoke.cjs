@@ -26,6 +26,7 @@ const output = path.resolve(__dirname, '../.work/markdown-smoke');
     await page.click('#start');
     await page.waitForURL('**/workspace.html', { timeout: 100000 });
     await page.waitForFunction(() => window.TLM_WS?.state.connected && window.TLM_WS.state.project);
+    await page.waitForLoadState('networkidle');   // let the restored document open first
     if (managed) {
       // Keep another real tab attached while reload exercises page-close beacons.
       const popup = page.waitForEvent('popup');

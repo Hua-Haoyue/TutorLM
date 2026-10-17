@@ -14,7 +14,10 @@ AGENT_SYSTEM = '''You are TutorLM's workspace assistant. Return ONLY one JSON ob
  "arguments":{}, "changes":[]}.
 You may request ONE read tool per step: list_files {}, search_code {query},
 read_file {path,start_line,end_line}, read_document {document_id}, read_nodes {node_id?},
-web_search {query} (only when web_search_enabled is true).
+web_search {query} (only when web_search_enabled is true; use it for public or
+current facts the project does not contain). Web results list sources
+with numbers; cite the pages you used as [1], [2] in the answer. The sources are shown
+to the user as links, so never invent URLs or cite pages you were not given.
 Use relative paths from files and IDs from documents/nodes, never host paths.
 Quote project evidence using path:line or document/node ID. Use provided indexes
 and tools to inspect related files before answering code questions.
@@ -47,6 +50,31 @@ AGENT_SCHEMA = {'type': 'object', 'required': ['answer', 'tool', 'arguments', 'c
         'kind': {'type': 'string', 'enum': ['file', 'node', 'explanation', 'document']},
         'path': _STR, 'node_id': {'type': 'string', 'nullable': True}, 'document_id': _STR,
         'title': _STR, 'content': _STR, 'text': _STR}}}}}
+
+
+def web_sources(result):
+    """Public pages from a web_search result: http(s) links with a short title only."""
+    out = []
+    for item in (result or {}).get('sources') or []:
+        if not isinstance(item, dict):
+            continue
+        uri, title = item.get('uri') or item.get('url'), item.get('title')
+        if not isinstance(uri, str) or len(uri) > 2000 or not uri.lower().startswith(('https://', 'http://')):
+            continue
+        title = title.strip()[:200] if isinstance(title, str) and title.strip() else uri.split('/')[2][:200]
+        out.append({'uri': uri, 'title': title})
+    return out[:10]
+
+
+def collect_source(sources, source):
+    """Number of a source in this reply (1-based), adding it once; at most 20 per reply."""
+    for i, known in enumerate(sources):
+        if known['uri'] == source['uri']:
+            return i + 1
+    if len(sources) >= 20:
+        return None
+    sources.append({'uri': source['uri'], 'title': source['title']})
+    return len(sources)
 
 def parse_step(raw):
     """One agent step from model text. Models often wrap the JSON in a code fence, add a
@@ -234,7 +262,7 @@ class WorkspaceAgent:
         def guard():
             if self.app.runs.is_cancelled(ctx.run_id) or not self.app.runs.session_valid(ctx.session_id):
                 raise CancelledRun()
-        trace = []
+        trace, sources = [], []
         for step in range(8):
             guard()
             for attempt in range(2):
@@ -261,6 +289,8 @@ class WorkspaceAgent:
             try:
                 result = self.tools(tool, data['arguments'], options)
                 trace.append({'tool': tool, 'status': 'ok'})
+                if tool == 'web_search':
+                    result = dict(result, sources=[dict(s, n=collect_source(sources, s)) for s in web_sources(result)])
             except (DomainError, AppError) as exc:
                 result = {'error': str(exc)}
                 trace.append({'tool': tool, 'status': 'denied'})
@@ -278,7 +308,8 @@ class WorkspaceAgent:
                 raise ConflictError('Chat changed while this reply was generated; retry')
             with self.app.store.transaction() as conn:
                 proposal = str(uuid4()) if changes else None
-                body = {'text': data['answer'], 'tools': trace, 'proposal_id': proposal}
+                body = {'text': data['answer'], 'tools': trace, 'proposal_id': proposal,
+                        **({'sources': sources} if sources else {})}
                 for role, value in [('user', {'text': ctx.payload['message']}), ('assistant', body)]:
                     conn.execute('INSERT INTO chat_messages(thread_id,role,body,created) VALUES(?,?,?,?)',
                                  (thread_id, role, json.dumps(value, ensure_ascii=False), time.time()))

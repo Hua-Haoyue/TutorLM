@@ -344,3 +344,25 @@ def test_gemini_chat_sends_schema_and_falls_back_when_rejected():
     assert json.loads(OpenAIProvider(Transport()).agent_step({'message': 'hi'}, {}))['answer'] == 'ok'
     assert calls == [AGENT_SCHEMA, None]
     assert gemini_schema(AGENT_SCHEMA)['properties']['tool']['enum'][0] == 'list_files'
+
+
+def test_chat_web_search_sources_are_numbered_safe_links(client, session_headers, wait_for_run, monkeypatch):
+    app = client.app.state.tutorlm.services
+    thread = start_chat(client, session_headers)
+    monkeypatch.setattr(app.provider, 'model_features', lambda: {'effort': False, 'web_search': True, 'offline': False})
+    monkeypatch.setattr(app.provider, 'research', lambda query, options: {'text': 'evidence', 'sources': [
+        {'uri': 'https://example.org/a', 'title': 'Page A'}, {'uri': 'javascript:alert(1)', 'title': 'bad'},
+        {'uri': 'https://example.org/a', 'title': 'dup'}, {'uri': 'http://example.net/b', 'title': ''}]})
+    seen = []
+    def step(payload, _options):
+        seen.append(payload['tool_results'])
+        if len(seen) == 1:
+            return output('', tool='web_search', arguments={'query': 'topic'})
+        return output('See [1] and [2].')
+    monkeypatch.setattr(app.provider, 'agent_step', step)
+    run = chat(client, session_headers, wait_for_run, thread, model={'effort': 'auto', 'web_search': True})
+    assert run['state'] == 'completed', run
+    given = json.loads(seen[1][0]['result'])['sources']
+    assert [s['n'] for s in given] == [1, 1, 2]
+    body = client.get('/api/chat/threads/' + thread, headers=session_headers).json()['messages'][-1]['body']
+    assert body['sources'] == [{'uri': 'https://example.org/a', 'title': 'Page A'}, {'uri': 'http://example.net/b', 'title': 'example.net'}]

@@ -144,3 +144,7 @@ select.input { appearance: auto; }
 
 /* Regenerate / back-to-parent sit on the card's text column, left-aligned. */
 .gnode.sel .node-learning-actions { justify-content: flex-start; padding: 6px 0 2px; margin: 0; }
+/* Selected card: the explanation pager sits on the title line, right-aligned. */
+.gnode__titlerow { display: flex; align-items: flex-start; gap: 8px; }
+.gnode__titlerow > .title-view, .gnode__titlerow > .title-input { flex: 1 1 auto; min-width: 0; }
+.gnode__titlerow > .pager { margin-left: auto; flex: none; white-space: nowrap; padding-top: 1px; }

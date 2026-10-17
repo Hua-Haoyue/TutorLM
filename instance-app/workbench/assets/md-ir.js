@@ -84,15 +84,16 @@
       return { start, end, text: src.slice(start, end) };
     }
 
-    function begin(block, clientX, clientY) {
+    /* `at` ('start' | 'end') places the caret without a pointer (keyboard navigation). */
+    function begin(block, clientX, clientY, at) {
       if (active) finish();
       const s = span(block);
       if (!s) return false;
       const cell = /^T[DH]$/.test(block.tagName);
       // Caret: rendered text before the click point → nearest source offset.
-      let caret = firstContent(s.text);
-      const pos = document.caretPositionFromPoint?.(clientX, clientY) || null;
-      const range = pos ? (() => { const r = document.createRange(); r.setStart(pos.offsetNode, pos.offset); return r; })()
+      let caret = at === 'end' ? s.text.length : firstContent(s.text);
+      const pos = at ? null : document.caretPositionFromPoint?.(clientX, clientY) || null;
+      const range = at ? null : pos ? (() => { const r = document.createRange(); r.setStart(pos.offsetNode, pos.offset); return r; })()
         : document.caretRangeFromPoint?.(clientX, clientY);
       if (range && block.contains(range.startContainer)) {
         const pre = document.createRange();
@@ -111,13 +112,10 @@
       const ranges = opts.protectedIn(s.start, s.end, block).map((r) => ({ ...r, start: r.start - s.start, end: r.end - s.start }));
       block.classList.add('ir-edit');
       block.replaceChildren(ta);
-      active = { block, start: s.start, end: s.end, original: s.text, last: s.text, ranges, ta, cell };
-      fit();
-      ta.focus({ preventScroll: true });
+      active = { block, start: s.start, end: s.end, original: s.text, last: s.text, ranges, ta, cell,
+        code: block.tagName === 'PRE' || block.classList.contains('math-block'), list: block.tagName === 'LI' };
+      listen(ta);
       ta.setSelectionRange(caret, caret);
-      ta.addEventListener('input', onInput);
-      ta.addEventListener('keydown', onKey);
-      ta.addEventListener('blur', () => { if (active?.ta === ta) finish(); });
       return true;
     }
     function fit() {
@@ -148,8 +146,110 @@
       a.last = value;
       fit();
     }
+    /* Typora-style keys:
+       Enter        a new paragraph (a new list item inside a list); a plain newline in code / math
+       Shift+Enter  a newline inside the paragraph
+       Enter in a table cell: the cell below; from the last row, a new paragraph after the table
+       ↑ / ↓ on the first / last line: the previous / next block (the cell above / below in a
+       table); ↓ past the last block opens a new paragraph at the end of the document. */
     function onKey(e) {
-      if (e.key === 'Escape' || ((e.ctrlKey || e.metaKey) && e.key === 'Enter')) { e.preventDefault(); e.stopPropagation(); active?.ta.blur(); }
+      const a = active;
+      if (!a) return;
+      if (e.key === 'Escape' || ((e.ctrlKey || e.metaKey) && e.key === 'Enter')) { e.preventDefault(); e.stopPropagation(); a.ta.blur(); return; }
+      if (e.isComposing || e.altKey || e.ctrlKey || e.metaKey) return;
+      const ta = a.ta, collapsed = ta.selectionStart === ta.selectionEnd;
+      if (e.key === 'Enter' && !e.shiftKey) {
+        if (a.cell) { e.preventDefault(); e.stopPropagation(); cellMove(1, true); return; }
+        if (a.code) return;
+        e.preventDefault(); e.stopPropagation();
+        const before = ta.value.slice(0, ta.selectionStart), line = before.slice(before.lastIndexOf('\n') + 1);
+        const item = a.list && /^(\s*)([-*+]|(\d+)([.)]))(\s+)(\[[ xX]\]\s+)?/.exec(line);
+        const marker = item ? item[1] + (item[3] ? (Number(item[3]) + 1) + item[4] : item[2]) + item[5] + (item[6] ? '[ ] ' : '') : null;
+        insert(marker ? '\n' + marker : '\n\n');
+        return;
+      }
+      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && collapsed && !e.shiftKey) {
+        const up = e.key === 'ArrowUp', at = ta.selectionStart;
+        if (up ? lineTop(ta, at) > lineTop(ta, 0) : lineTop(ta, at) < lineTop(ta, ta.value.length)) return;
+        e.preventDefault(); e.stopPropagation();
+        if (a.cell) cellMove(up ? -1 : 1, false); else go(up ? -1 : 1);
+      }
+    }
+    function insert(text) {
+      const ta = active.ta;
+      ta.setRangeText(text, ta.selectionStart, ta.selectionEnd, 'end');
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    /* Vertical position of a caret offset (to tell the first / last visual line). */
+    function lineTop(ta, offset) {
+      const cs = getComputedStyle(ta), mirror = document.createElement('div');
+      for (const k of ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight', 'letterSpacing', 'paddingLeft', 'paddingRight',
+        'borderLeftWidth', 'borderRightWidth', 'boxSizing', 'textIndent', 'tabSize']) mirror.style[k] = cs[k];
+      Object.assign(mirror.style, { position: 'absolute', visibility: 'hidden', whiteSpace: 'pre-wrap', overflowWrap: 'break-word',
+        width: ta.clientWidth + 'px', left: '-9999px', top: '0' });
+      mirror.textContent = ta.value.slice(0, offset);
+      const mark = document.createElement('span'); mark.textContent = '​'; mirror.appendChild(mark);
+      document.body.appendChild(mirror);
+      const top = mark.offsetTop;
+      mirror.remove();
+      return top;
+    }
+    /* Where a block that started at `oldStart` starts after the active edit is committed. */
+    function shifted(oldStart) {
+      const a = active;
+      return oldStart >= a.end ? oldStart + (a.last.length - a.original.length) : oldStart;
+    }
+    function reopen(start, at) {
+      const block = opts.sheet.querySelector(`[data-b][data-start="${start}"]`);
+      if (block) begin(block, 0, 0, at);
+    }
+    function blocks() { return [...opts.sheet.querySelectorAll('[data-b][data-start][data-end]')]; }
+    /* Previous / next block in reading order; past the end, a new paragraph. */
+    function go(dir, from = active.block) {
+      const all = blocks(), i = all.indexOf(from), next = i < 0 ? null : all[i + dir];
+      if (next) { const start = shifted(Number(next.dataset.start)); finish(); reopen(start, dir < 0 ? 'end' : 'start'); return; }
+      if (dir > 0) appendAfter(from);
+    }
+    function cellMove(dir, enter) {
+      const a = active, table = a.block.closest('table'), cell = a.block.closest('td, th');
+      const rows = table ? [...table.rows] : [], r = rows.indexOf(cell?.parentElement);
+      const target = rows[r + dir]?.cells[Math.min(cell.cellIndex, rows[r + dir].cells.length - 1)];
+      if (target?.matches('[data-b][data-start]')) {
+        const start = shifted(Number(target.dataset.start)); finish(); reopen(start, 'end'); return;
+      }
+      const cells = table ? [...table.querySelectorAll('[data-b][data-start]')] : [];
+      if (dir > 0 && enter) appendAfter(cells.at(-1) || a.block);
+      else go(dir, dir < 0 ? cells[0] || a.block : cells.at(-1) || a.block);
+    }
+    /* A new, empty paragraph right after `block` (after its table / list as a whole). */
+    function appendAfter(block) {
+      const src = opts.source(), lineEnd = src.indexOf('\n', Number(block.dataset.end) - 1);
+      let at = /^T[DH]$/.test(block.tagName) ? (lineEnd < 0 ? src.length : lineEnd) : Number(block.dataset.end);
+      while (at > 0 && (src[at - 1] === '\n' || src[at - 1] === '\r')) at--;
+      const where = active ? shifted(at) : at, startOf = Number(block.dataset.start), first = active && shifted(startOf);
+      if (active) finish();
+      // Re-rendering replaced the DOM: find the block again, then its top-level element.
+      let el = opts.sheet.querySelector(`[data-b][data-start="${first ?? startOf}"]`);
+      if (!el) return;
+      while (el.parentElement && el.parentElement !== opts.sheet && !el.parentElement.classList.contains('doc')) el = el.parentElement;
+      const box = document.createElement(el.tagName === 'P' ? 'p' : 'div');
+      box.className = 'ir-edit ir-insert';
+      el.after(box);
+      const ta = document.createElement('textarea');
+      ta.className = 'ir-input';
+      ta.spellcheck = false;
+      ta.setAttribute('aria-label', '新段落的 Markdown 源文本，离开后重新渲染');
+      box.appendChild(ta);
+      active = { block: box, start: where, end: where, original: '', last: '', ranges: [], ta, cell: false, insert: true };
+      listen(ta);
+    }
+    function listen(ta) {
+      fit();
+      ta.focus({ preventScroll: true });
+      ta.addEventListener('input', onInput);
+      ta.addEventListener('keydown', onKey);
+      ta.addEventListener('blur', () => { if (active?.ta === ta) finish(); });
+      ta.scrollIntoView({ block: 'nearest' });
     }
     /* Leave the block: hand the new source (and the moved protected ranges) back. */
     function finish() {
@@ -157,6 +257,12 @@
       if (!a) return;
       active = null;
       a.ta.removeEventListener('input', onInput);
+      if (a.insert) {
+        const body = a.last.replace(/^\s+/, '').replace(/\s+$/, '');
+        if (!body) a.block.remove();
+        opts.commit({ start: a.start, end: a.end, text: body ? '\n\n' + body : '', cancelled: !body, ranges: [] });
+        return;
+      }
       opts.commit({ start: a.start, end: a.end, text: a.last, cancelled: a.last === a.original,
         ranges: a.ranges.map((r) => ({ ...r, start: r.start + a.start, end: r.end + a.start })) });
     }

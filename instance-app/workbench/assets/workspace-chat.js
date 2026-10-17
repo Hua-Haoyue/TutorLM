@@ -27,6 +27,7 @@
     <output class="workspace-chat-status" role="status"></output>
     <form class="workspace-chat-form"><textarea rows="1" maxlength="8000" aria-label="Chat 消息" placeholder="询问当前项目…（Enter 发送，Shift+Enter 换行）" required></textarea>
       <div class="workspace-chat-actions">
+        <button type="button" class="icon-btn workspace-chat-web" data-chat-web title="联网搜索（回答附参考网页）" aria-label="Chat 联网搜索" aria-pressed="false" hidden>${icon('globe')}</button>
         <button type="button" class="icon-btn" data-chat-cancel title="停止生成" aria-label="停止生成" hidden>${icon('stop')}</button>
         <button type="submit" class="workspace-chat-send" title="发送消息" aria-label="发送消息">${icon('send')}</button></div></form>`;
   document.body.appendChild(panel);
@@ -35,6 +36,20 @@
   const cancel = panel.querySelector('[data-chat-cancel]'), title = panel.querySelector('.workspace-chat-title');
   const listBtn = panel.querySelector('[data-chat-list]'), threadsEl = panel.querySelector('.workspace-chat-threads');
   const threadList = panel.querySelector('.workspace-chat-thread-list');
+  const webBtn = panel.querySelector('[data-chat-web]');
+  /* Chat has its own web-search switch, separate from 偏好设置 (which governs the
+     explanations of circled text); it is offered only when the model supports it. */
+  const WEB_KEY = 'tlm.chat.web';
+  const webOn = () => !!api.runtime?.model_features?.web_search && localStorage.getItem(WEB_KEY) === 'on';
+  const chatModel = () => ({ ...window.TLM_WS.modelOptions(), web_search: webOn() });
+  function syncWeb() {
+    webBtn.hidden = !api.runtime?.model_features?.web_search;
+    webBtn.setAttribute('aria-pressed', String(webOn()));
+  }
+  webBtn.onclick = () => {
+    localStorage.setItem(WEB_KEY, webOn() ? 'off' : 'on'); syncWeb();
+    status.textContent = webBtn.getAttribute('aria-pressed') === 'true' ? '已开启联网搜索，回答会附上参考网页' : '已关闭联网搜索';
+  };
   const markdown = TutorMarkdown.createRenderer({ math: (text, display) => window.katex
     ? katex.renderToString(text, { displayMode: !!display, throwOnError: false, trust: false })
     : text.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])) });
@@ -143,6 +158,32 @@
       <div class="workspace-chat-bubble"><span class="sr-only">${role === 'user' ? '你：' : 'TutorLM：'}</span>${html}${extra}</div>`;
     return article;
   }
+  /* Only http(s) links are shown; titles and hosts are escaped text. */
+  function safeSources(list) {
+    return (Array.isArray(list) ? list : []).filter((s) => s && typeof s.uri === 'string' && /^https?:\/\//i.test(s.uri)).slice(0, 20)
+      .map((s) => ({ uri: s.uri, title: typeof s.title === 'string' && s.title ? s.title : host(s.uri) }));
+  }
+  function host(uri) { try { return new URL(uri).hostname.replace(/^www\./, ''); } catch { return ''; } }
+  /* "[2]" in the answer text becomes a link to the second source. */
+  function linkCitations(root, sources) {
+    if (!root) return;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode: (n) =>
+      n.parentElement.closest('a, code, pre, .katex') ? NodeFilter.FILTER_REJECT : /\[\d{1,2}\]/.test(n.data) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+      const frag = document.createDocumentFragment();
+      for (const part of node.data.split(/(\[\d{1,2}\])/)) {
+        const n = /^\[(\d{1,2})\]$/.exec(part)?.[1], src = n && sources[Number(n) - 1];
+        if (!src) { frag.append(part); continue; }
+        const a = document.createElement('a');
+        a.href = src.uri; a.target = '_blank'; a.rel = 'noopener noreferrer nofollow';
+        a.className = 'workspace-chat-cite'; a.textContent = n; a.title = src.title;
+        frag.append(a);
+      }
+      node.replaceWith(frag);
+    }
+  }
   function render(value) {
     log.replaceChildren();
     const firstUser = value.messages.find((m) => m.role === 'user');
@@ -160,7 +201,11 @@
         ? `<div class="workspace-chat-tools">${message.body.tools.map((t) => `<span class="workspace-chat-tool ${t.status === 'ok' ? '' : 'bad'}">${esc(t.tool)} · ${esc(t.status)}</span>`).join('')}</div>` : '';
       const body = message.role === 'user' ? esc(message.body.text).replace(/\n/g, '<br>')
         : `<div class="answer">${markdown.render(message.body.text, { blocks: false })}</div>`;
-      const article = bubble(message.role === 'user' ? 'user' : 'assistant', body, tools);
+      const sources = message.role === 'user' ? [] : safeSources(message.body.sources);
+      const refs = sources.length ? `<div class="workspace-chat-sources"><span class="label">参考网页</span><ol>${sources.map((s, i) =>
+        `<li><a href="${esc(s.uri)}" target="_blank" rel="noopener noreferrer nofollow" title="${esc(s.uri)}"><span class="mono">${i + 1}</span><span class="workspace-chat-source-title">${esc(s.title)}</span><small>${esc(host(s.uri))}</small></a></li>`).join('')}</ol></div>` : '';
+      const article = bubble(message.role === 'user' ? 'user' : 'assistant', body, tools + refs);
+      if (sources.length) linkCitations(article.querySelector('.answer'), sources);
       if (message.created) article.title = new Date(message.created * 1000).toLocaleString('zh-CN');
       log.appendChild(article);
     }
@@ -200,7 +245,7 @@
 
   toggle.onclick = async () => {
     if (!panel.hidden) { close(); return; }
-    panel.hidden = false; toggle.setAttribute('aria-pressed', 'true'); clamp(); input.focus();
+    panel.hidden = false; toggle.setAttribute('aria-pressed', 'true'); clamp(); syncWeb(); input.focus();
     try { render(await current()); status.textContent = ''; } catch (error) { status.textContent = error.message; }
   };
   panel.querySelectorAll('[data-chat-new]').forEach((b) => { b.onclick = async () => {
@@ -217,7 +262,7 @@
     try {
       const value = await current();
       pending = message; input.value = ''; grow(); render(value);
-      await api.run('workspace_chat', { thread_id: threadId, message, model: window.TLM_WS.modelOptions() },
+      await api.run('workspace_chat', { thread_id: threadId, message, model: chatModel() },
         { onRun: run => { runId = run.id; status.textContent = run.state === 'running' ? '检索与生成中…' : run.state === 'queued' ? '排队中…' : ''; } });
       pending = null; render(await current()); status.textContent = '';
     } catch (error) {
