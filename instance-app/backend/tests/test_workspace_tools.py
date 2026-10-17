@@ -301,3 +301,46 @@ def test_chat_thread_list_is_titled_ordered_and_session_scoped(client, session_h
     assert client.get('/api/chat/threads', headers=session_headers).json()['items'][0]['id'] == first
     token = client.post('/api/sessions', json={'invite_code': 'TLM-DEMO-TEST'}).json()['access_token']
     assert client.get('/api/chat/threads', headers={'Authorization': 'Bearer ' + token}).json()['items'] == []
+
+
+def test_agent_step_accepts_fenced_or_partial_json_but_not_garbage():
+    from backend.application.services.workspace_agent import parse_step
+    assert parse_step('```json\n{"answer":"Hi","tool":null}\n```') == {'answer': 'Hi', 'tool': None, 'arguments': {}, 'changes': []}
+    assert parse_step('{"answer":"","tool":"list_files","arguments":null,"changes":null,"thought":"x"}')['tool'] == 'list_files'
+    assert parse_step('{"answer":"ok","tool":"null"}')['tool'] is None
+    for bad in ['not json', '{"answer":"","tool":null}', '{"answer":"x","changes":"all"}', 'x' * 100001]:
+        with pytest.raises((ValueError, TypeError)):
+            parse_step(bad)
+
+
+def test_chat_retries_once_after_malformed_model_output(client, session_headers, wait_for_run, monkeypatch):
+    app = client.app.state.tutorlm.services
+    thread = start_chat(client, session_headers)
+    seen = []
+    def step(payload, _options):
+        seen.append(payload.get('retry_feedback'))
+        return 'Sure! here is my answer' if len(seen) == 1 else output('Recovered')
+    monkeypatch.setattr(app.provider, 'agent_step', step)
+    run = chat(client, session_headers, wait_for_run, thread)
+    assert run['state'] == 'completed' and seen[0] is None and 'JSON' in seen[1]
+    messages = client.get('/api/chat/threads/' + thread, headers=session_headers).json()['messages']
+    assert messages[-1]['body']['text'] == 'Recovered'
+
+
+def test_gemini_chat_sends_schema_and_falls_back_when_rejected():
+    from backend.host.local.provider import OpenAIProvider
+    from backend.domain.errors import ProviderUnavailable
+    from backend.application.ports.provider import GenerateResult
+    from backend.infrastructure.providers.gemini import gemini_schema
+    from backend.application.services.workspace_agent import AGENT_SCHEMA
+    calls = []
+    class Transport:
+        info = type('I', (), {'name': 'gemini', 'model': 'gemini-2.5-flash'})()
+        def generate(self, request):
+            calls.append(request.json_schema)
+            if request.json_schema:
+                raise ProviderUnavailable('Gemini HTTP 400: upstream request failed', details={'status': 400})
+            return GenerateResult(text=output('ok'), provider='gemini', model='m', payload={})
+    assert json.loads(OpenAIProvider(Transport()).agent_step({'message': 'hi'}, {}))['answer'] == 'ok'
+    assert calls == [AGENT_SCHEMA, None]
+    assert gemini_schema(AGENT_SCHEMA)['properties']['tool']['enum'][0] == 'list_files'

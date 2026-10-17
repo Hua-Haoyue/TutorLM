@@ -35,6 +35,46 @@ If a tool fails, use the error as feedback, never pretend it succeeded.
 '''
 
 
+# Generation hint for providers with structured output (Gemini responseSchema); the reply
+# is still validated by parse_step and prepare_changes.
+_STR, _INT = {'type': 'string'}, {'type': 'integer'}
+AGENT_SCHEMA = {'type': 'object', 'required': ['answer', 'tool', 'arguments', 'changes'], 'properties': {
+    'answer': _STR,
+    'tool': {'type': 'string', 'nullable': True, 'enum': ['list_files', 'search_code', 'read_file', 'read_document', 'read_nodes', 'web_search']},
+    'arguments': {'type': 'object', 'properties': {'query': _STR, 'path': _STR, 'start_line': _INT, 'end_line': _INT,
+                                                    'document_id': _STR, 'node_id': _STR}},
+    'changes': {'type': 'array', 'items': {'type': 'object', 'required': ['kind'], 'properties': {
+        'kind': {'type': 'string', 'enum': ['file', 'node', 'explanation', 'document']},
+        'path': _STR, 'node_id': {'type': 'string', 'nullable': True}, 'document_id': _STR,
+        'title': _STR, 'content': _STR, 'text': _STR}}}}}
+
+def parse_step(raw):
+    """One agent step from model text. Models often wrap the JSON in a code fence, add a
+    stray key or leave out empty fields; accept those, but nothing that changes meaning."""
+    if not isinstance(raw, str) or len(raw) > 100000:
+        raise ValueError('oversized or non-text response')
+    text = raw.strip()
+    if text.startswith('```'):
+        text = text.split('\n', 1)[1] if '\n' in text else ''
+        text = text.rsplit('```', 1)[0]
+    start, end = text.find('{'), text.rfind('}')
+    if start < 0 or end < start:
+        raise ValueError('no JSON object')
+    data = json.loads(text[start:end + 1])
+    if not isinstance(data, dict):
+        raise ValueError('not a JSON object')
+    tool = data.get('tool')
+    if isinstance(tool, str) and tool.strip().lower() in ('', 'null', 'none'):
+        tool = None
+    step = {'answer': data.get('answer') or '', 'tool': tool,
+            'arguments': data.get('arguments') or {}, 'changes': data.get('changes') or []}
+    if not isinstance(step['answer'], str) or not isinstance(step['arguments'], dict) or not isinstance(step['changes'], list):
+        raise ValueError('answer must be text, arguments an object and changes a list')
+    if step['tool'] is None and not step['answer'].strip():
+        raise ValueError('empty answer without a tool')
+    return step
+
+
 class WorkspaceAgent:
     def __init__(self, app):
         self.app = app
@@ -197,15 +237,18 @@ class WorkspaceAgent:
         trace = []
         for step in range(8):
             guard()
-            try:
+            for attempt in range(2):
                 raw = self.app.provider.agent_step(payload, {**options, 'web_search': False})
-                if not isinstance(raw, str) or len(raw) > 100000:
-                    raise ValueError('Oversized agent response')
-                data = json.loads(raw)
-                if not isinstance(data, dict) or set(data) != {'answer', 'tool', 'arguments', 'changes'}:
-                    raise ValueError('Invalid agent response')
-            except (ValueError, TypeError) as exc:
-                raise ProviderError('Chat returned invalid structured output') from exc
+                try:
+                    data = parse_step(raw)
+                    break
+                except (ValueError, TypeError) as exc:
+                    if attempt:
+                        raise ProviderError('Chat returned invalid structured output') from exc
+                    payload['retry_feedback'] = ('Your previous reply was not the required JSON object (' + str(exc)
+                        + '). Reply with ONLY {"answer":...,"tool":...,"arguments":{},"changes":[]}.')
+                    guard()
+            payload.pop('retry_feedback', None)
             tool = data['tool']
             if tool is None:
                 if not isinstance(data['answer'], str) or not 1 <= len(data['answer'].strip()) <= 30000:

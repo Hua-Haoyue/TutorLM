@@ -7,7 +7,7 @@ from dataclasses import asdict
 
 from backend.application.ports.model_provider import ProviderCapabilities
 from backend.application.ports.provider import GenerateRequest
-from backend.domain.errors import ProviderError
+from backend.domain.errors import ProviderError, ProviderUnavailable
 
 DEFAULT_MODEL = 'offline-demo'
 
@@ -143,9 +143,17 @@ class OpenAIProvider:
         return {'text': result.text[:12000], 'sources': result.payload.get('sources', [])[:10]}
 
     def agent_step(self, payload, options):
-        from backend.application.services.workspace_agent import AGENT_SYSTEM
-        return self._generate('workspace_chat', json.dumps(payload, ensure_ascii=False), AGENT_SYSTEM,
-                              json_object=True, max_tokens=max(4096, self.max_tokens), options=options)
+        from backend.application.services.workspace_agent import AGENT_SCHEMA, AGENT_SYSTEM
+        prompt = json.dumps(payload, ensure_ascii=False)
+        try:
+            return self._generate('workspace_chat', prompt, AGENT_SYSTEM, json_object=True, json_schema=AGENT_SCHEMA,
+                                  max_tokens=max(4096, self.max_tokens), options=options)
+        except ProviderUnavailable as exc:
+            # An endpoint that rejects the schema hint (HTTP 400) still gets plain JSON mode.
+            if (getattr(exc, 'details', None) or {}).get('status') != 400:
+                raise
+            return self._generate('workspace_chat', prompt, AGENT_SYSTEM, json_object=True,
+                                  max_tokens=max(4096, self.max_tokens), options=options)
 
     def explain(self, request):
         from backend.application.services.learning_obstacles import OUTPUT_SCHEMA, SYSTEM, STRATEGY
