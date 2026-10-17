@@ -641,7 +641,8 @@ def test_narration_run_derives_segment_totals(client, session_headers, project_i
     finished = wait_for_run(created.json()["id"])
     assert finished["state"] == "completed"
     narration = finished["result"]["narration"]
-    assert narration["segment_count"] == len(narration["segments"]) == 2
+    # The selected root nodes are stitched into one narration segment.
+    assert narration["segment_count"] == len(narration["segments"]) == 1
     # The total is derived server-side from the segments, not supplied by client.
     assert narration["total_duration_seconds"] == pytest.approx(
         sum(seg["duration_seconds"] for seg in narration["segments"])

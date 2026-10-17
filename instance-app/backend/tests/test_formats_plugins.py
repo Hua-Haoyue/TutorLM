@@ -387,12 +387,15 @@ def test_narration_workflow_derives_counts_and_duration():
     context = SimpleNamespace(container=SimpleNamespace(context=SimpleNamespace(
         projects=SimpleNamespace(get=lambda _: SimpleNamespace(title='Project')),
         nodes=SimpleNamespace(get=lambda key: next(n for n in nodes if n.id == key)),
-        provider=SimpleNamespace(narrate=lambda request: ['one', 'two'], capabilities=ProviderCapabilities('fake', 'offline')),
+        explanations=SimpleNamespace(list_for_node=lambda _: [],
+                                     narration_passage=lambda roots: {'revision_id': 'r', 'passage': 'source'}),
+        provider=SimpleNamespace(narrate=lambda request: ['one stitched paragraph'], capabilities=ProviderCapabilities('fake', 'offline')),
     )), cancel=SimpleNamespace(check=lambda: None))
     result = NarrationWorkflow().run(context, WorkflowInput('narration', {'project_id': 'p', 'node_ids': ['n1', 'n2']})).entity
-    assert result.segment_count == len(result.segments) == 2
-    assert result.total_duration_seconds == pytest.approx(sum(s.duration_seconds for s in result.segments))
-    assert [s.node_id for s in result.segments] == ["n1", "n2"]
+    # Root nodes are stitched into one narration segment that keeps the first root's id.
+    assert result.segment_count == len(result.segments) == 1
+    assert result.total_duration_seconds == pytest.approx(result.segments[0].duration_seconds)
+    assert result.segments[0].node_id == "n1" and result.segments[0].text == 'one stitched paragraph'
 
 
 def test_narration_workflow_rejects_too_many_nodes():

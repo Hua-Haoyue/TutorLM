@@ -71,6 +71,43 @@ class ExplanationService:
         self._observe = observe
         self._allow_generate = allow_generate
 
+    def narration_passage(self, roots):
+        """Read bounded original context around root selections, in document order."""
+        if not roots or not roots[0].document_id:
+            raise InvalidInputError('全局串讲需要可读取的原文。')
+        document_id = roots[0].document_id
+        document = self._app.structured_text(document_id, revision_id=None, extractor_version=None)
+        text = document['text']
+        intervals = []
+        for root in roots:
+            source = (root.metadata or {}).get('source') or {}
+            quote = source.get('quote') or root.content or ''
+            if not quote:
+                raise InvalidInputError('根节点缺少原文选区，请重新定位后串讲。')
+            if source.get('document_id') and source.get('revision_id'):
+                resolved = self._app.resolve_ref(source)
+                if not resolved.get('resolved') or source['revision_id'] != document['revision_id']:
+                    raise ConflictError('根节点原文已变化，请重新定位后串讲。')
+                quote = resolved['text']
+                start = resolved['citation']['span']['start']
+                if text[start:start + len(quote)] != quote:
+                    raise ConflictError('根节点原文位置已失效，请重新定位后串讲。')
+            else:
+                start = text.find(quote)
+                if start < 0 or text.find(quote, start + 1) >= 0:
+                    raise InvalidInputError('无法唯一定位根节点原文，请重新定位后串讲。')
+            intervals.append((max(0, start - 900), min(len(text), start + len(quote) + 900)))
+        merged = []
+        for start, end in sorted(intervals):
+            if merged and start <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+            else:
+                merged.append((start, end))
+        passage = '\n\n[原文不连续片段]\n\n'.join(text[start:end] for start, end in merged)
+        if len(passage) > 24000:
+            raise InvalidInputError('选中根节点的原文范围过大，请减少本次串讲的根节点。')
+        return {'revision_id': document['revision_id'], 'passage': passage}
+
     def explain(self, *, node_id, question=None, persist=False, response_mode='auto', preferences=None):
         if not self._allow_generate:
             raise InvalidInputError('Plugin has no models.generate capability')
