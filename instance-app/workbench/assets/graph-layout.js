@@ -3,7 +3,7 @@
 
   function layout(nodes, edges, sizes = {}) {
     const graph = new root.dagre.graphlib.Graph();
-    graph.setGraph({ rankdir: 'TB', ranker: 'network-simplex', nodesep: 48, ranksep: 80,
+    graph.setGraph({ rankdir: 'LR', ranker: 'network-simplex', nodesep: 32, ranksep: 96,
       marginx: 40, marginy: 40 });
     graph.setDefaultEdgeLabel(() => ({}));
     const ordered = [...nodes].sort((a, b) => (a.order_index || 0) - (b.order_index || 0)
@@ -13,8 +13,9 @@
       const size = sizes[node.id] || {};
       graph.setNode(node.id, { width: Math.max(332, size.width || 0), height: Math.max(60, size.height || 150) });
     }
-    // Keep hierarchy constraints first; feedback links are still drawn but cannot
-    // force a descendant above its ancestor or introduce a ranking cycle.
+    // Roots form the left column and each level of descendants the next column to
+    // the right. Hierarchy constraints come first; feedback links are still drawn
+    // but cannot force a descendant left of its ancestor or create a ranking cycle.
     function connect(from, to, weight) {
       if (from === to || !successors.has(from) || !successors.has(to)) return;
       const pending = [to], seen = new Set();
@@ -37,9 +38,16 @@
         reverse ? edge.source_node_id : edge.target_node_id, edge.relation === 'parent_of' ? 8 : 1);
     }
     root.dagre.layout(graph);
+    // dagre centres each card on its column; align the left edges instead so a
+    // column reads as one straight line (the column's extent is unchanged).
+    const left = new Map();
+    for (const node of ordered) {
+      const box = graph.node(node.id), column = box.rank ?? Math.round(box.x);
+      left.set(column, Math.min(left.get(column) ?? Infinity, box.x - box.width / 2));
+    }
     return Object.fromEntries(ordered.map(node => {
       const box = graph.node(node.id);
-      return [node.id, { x: Math.round(box.x - box.width / 2), y: Math.round(box.y - box.height / 2) }];
+      return [node.id, { x: Math.round(left.get(box.rank ?? Math.round(box.x))), y: Math.round(box.y - box.height / 2) }];
     }));
   }
 

@@ -1,14 +1,4 @@
-.card-select-tool {
-  display: inline-flex; align-items: center; gap: 5px; flex: none;
-  padding: 5px 9px; border: 1.5px dashed #b34b38; border-radius: 7px;
-  background: #fff7f1; color: #8c3427; font-size: 12px; font-weight: 600;
-  cursor: crosshair;
-}
-.card-select-tool svg { width: 18px; height: 18px; }
-.card-select-tool:hover:not(:disabled), .card-select-tool.is-active {
-  background: #a63c30; color: white; border-style: solid;
-}
-.card-select-tool:focus-visible { outline: 2px solid #a63c30; outline-offset: 2px; }
+.card-select-tool { cursor: crosshair; }
 .card-select-tool:disabled { opacity: .4; cursor: not-allowed; }
 .card-select-marquee[hidden] { display: none !important; }
 .card-select-mode { cursor: crosshair !important; }

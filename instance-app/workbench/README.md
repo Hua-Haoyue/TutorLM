@@ -64,11 +64,23 @@ Tracking these files does not build or deploy them automatically.
 
 The reader and explanation cards support pipe tables (including column alignment),
 nested ordered/unordered lists, read-only task checkboxes, links, strikethrough,
-fenced code blocks, block quotes, heading levels 1-6 and the existing KaTeX math.
+fenced code blocks, block quotes, heading levels 1-6 and KaTeX math written as
+`$…$`, `$$…$$`, `\(…\)` or `\[…\]`. Card titles and collapsed card overviews
+render the same inline Markdown and math; a selected card's title shows its
+source for editing when clicked.
 Tables scroll horizontally within the reader on narrow screens. Source ranges
 are retained per text block and table cell for node creation and source lookup.
 Raw HTML stays inert and remote images show alternative text without loading.
 The bundled markdown-it 15.0.3 parser and its license are under `assets/markdown-it/`.
+
+In the MD view, md/txt documents are edited in place (`assets/md-ir.js`): a click
+on a rendered block reveals that block's Markdown source, and leaving it (click
+elsewhere, Esc or Ctrl+Enter) renders it again. After a short pause the text is
+saved as a new document revision, and every text anchor of the document is moved
+to that revision with its shifted offsets. Text anchored to an explanation node
+cannot be changed; such an edit is reverted with the notice
+「请先去除解释节点再进行修改」. Table cells stay one line. `scripts/test-md-ir.cjs`
+covers the edit/protection logic; `scripts/browser-ir-edit.cjs` the full flow.
 
 Run the focused regression with `node --test scripts/test-markdown.cjs` from this
 directory. `scripts/fixtures/markdown-support.md` is a manual upload sample;
@@ -80,7 +92,9 @@ resolution, reload, search and desktop/mobile layout against a disposable backen
 The graph toolbar's AI relation action proposes additions, direction/type changes
 and removals for the current document. Previewing or rejecting suggestions leaves
 positions unchanged. Accepting selected suggestions applies them first, then
-animates a root-to-leaf, top-to-bottom layout and saves each node's position.
+animates a root-to-leaf, left-to-right layout (roots in the left column, each
+level of descendants in the next column, left edges aligned) and saves each
+node's position.
 An empty suggestion result also organizes the current graph. The existing manual
 layout button uses the same algorithm; cards can still be dragged afterwards.
 

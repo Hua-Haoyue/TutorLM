@@ -26,19 +26,39 @@
     });
     md.renderer.rules.math_inline = (tokens, index) => `<span class="math">${math(tokens[index].content)}</span>`;
 
+    const PAIRS = [['\\(', '\\)', false], ['\\[', '\\]', true], ['$$', '$$', true]];
+    md.inline.ruler.before('escape', 'math_delimited', (state, silent) => {
+      const start = state.pos;
+      const pair = PAIRS.find(([open]) => state.src.startsWith(open, start));
+      if (!pair) return false;
+      const [open, close, display] = pair;
+      const end = state.src.indexOf(close, start + open.length);
+      if (end < 0 || end === start + open.length) return false;
+      const content = state.src.slice(start + open.length, end);
+      if (!display && /[\n\r]/.test(content)) return false;
+      if (!silent) {
+        const token = state.push(display ? 'math_display' : 'math_inline', 'span', 0);
+        token.content = content.trim();
+      }
+      state.pos = end + close.length;
+      return true;
+    });
+    md.renderer.rules.math_display = (tokens, index) => `<span class="math math--display">${math(tokens[index].content, true)}</span>`;
+
     md.block.ruler.before('fence', 'math_block', (state, start, end, silent) => {
       const first = state.src.slice(state.bMarks[start] + state.tShift[start], state.eMarks[start]);
-      if (!first.startsWith('$$')) return false;
+      const fence = first.startsWith('$$') ? ['$$', '$$'] : first.startsWith('\\[') ? ['\\[', '\\]'] : null;
+      if (!fence) return false;
       if (silent) return true;
       const content = [], rest = first.slice(2);
       let next = start + 1;
-      const close = rest.indexOf('$$');
+      const close = rest.indexOf(fence[1]);
       if (close >= 0) content.push(rest.slice(0, close));
       else {
         content.push(rest);
         for (; next < end; next++) {
           const line = state.src.slice(state.bMarks[next] + state.tShift[next], state.eMarks[next]);
-          const at = line.indexOf('$$');
+          const at = line.indexOf(fence[1]);
           if (at >= 0) { content.push(line.slice(0, at)); next++; break; }
           content.push(line);
         }
@@ -49,7 +69,7 @@
       return true;
     }, { alt: ['paragraph', 'reference', 'blockquote', 'list'] });
     md.renderer.rules.math_block = (tokens, index, options, env, self) =>
-      `<div${self.renderAttrs(tokens[index])} class="math-block">${math(tokens[index].content)}</div>\n`;
+      `<div${self.renderAttrs(tokens[index])} class="math-block">${math(tokens[index].content, true)}</div>\n`;
 
     md.core.ruler.push('tasks_and_source_ranges', state => {
       let block = 0, row = null, cells = [], cellIndex = 0;

@@ -22,10 +22,10 @@
     const selectButton = document.createElement('button');
     selectButton.id = 'card-select-delete';
     selectButton.type = 'button';
-    selectButton.className = 'card-select-tool';
+    selectButton.className = 'icon-btn card-select-tool';
     selectButton.title = '点击进入框选，画完后立即删除；再次点击可取消';
     selectButton.setAttribute('aria-label', selectButton.title);
-    selectButton.innerHTML = '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="3" width="12" height="11" rx="1" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 2"/><path d="m11 12 6 5m0-5-6 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>框选删除</span>';
+    selectButton.innerHTML = '<svg class="ic" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="3.5" width="11" height="10" rx="1" stroke-dasharray="2.5 2"/><path d="m11.5 12.5 5 4.5m0-4.5-5 4.5"/></svg>';
     button.after(selectButton);
     const marquee = document.createElement('div');
     marquee.className = 'card-select-marquee';

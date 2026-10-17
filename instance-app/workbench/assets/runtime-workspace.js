@@ -250,8 +250,8 @@
 
   /* ================= Markdown (subset, escape-first) =================
      Top-level blocks get data-b="<index>" so anchors survive re-render. */
-  function mathHtml(m) {
-    if (window.katex) return katex.renderToString(m, { throwOnError: false, trust: false, strict: 'ignore', output: 'html' });
+  function mathHtml(m, display = false) {
+    if (window.katex) return katex.renderToString(m, { displayMode: !!display, throwOnError: false, trust: false, strict: 'ignore', output: 'html' });
     return esc(m)
       .replace(/\^(\{[^}]*\}|[\wᵀ]+)/g, (_, x) => '<sup>' + x.replace(/[{}]/g, '') + '</sup>')
       .replace(/_(\{[^}]*\}|[A-Za-z0-9]+)/g, (_, x) => '<sub>' + x.replace(/[{}]/g, '') + '</sub>');
@@ -282,6 +282,8 @@
     });
   }
   function renderReader(keepScroll) {
+    // Never discard a block being edited in place: leaving it commits and re-renders.
+    if (irEditor?.active) { irEditor.finish(); return; }
     const top = scroller.scrollTop;
     resetFollowPosition();
     hideAsk();
@@ -400,12 +402,14 @@
         m.dataset.node = n.id; m.title = '知识节点：' + n.title;
       };
       if (src?.selector?.type === 'text') {
-        if (src.revision_id !== S.doc.current_revision_id) return;
-        const at = src.selector.unit === 'utf16' ? src.selector.start : Array.from(S.text).slice(0, src.selector.start).join('').length;
+        const live = liveAnchor(n);
+        if (!live) return;
+        const at = live.start;
         const block = $$('[data-b]', sheet).find(el => Number(el.dataset.start) <= at && Number(el.dataset.end) > at);
         if (!block) return;
-        const raw = S.text.slice(Number(block.dataset.start), at), quote = collapse(src.quote);
-        const ordinal = [...raw.matchAll(new RegExp(escRe(src.quote), 'g'))].length;
+        const anchored = S.text.slice(live.start, live.end);
+        const raw = S.text.slice(Number(block.dataset.start), at), quote = collapse(anchored);
+        const ordinal = [...raw.matchAll(new RegExp(escRe(anchored), 'g'))].length;
         let from = 0, range = null;
         for (let i = 0; i <= ordinal; i++) { range = textRange(block, quote, from); if (!range) break; from = range.idx + quote.length; }
         if (range) wrapRange(range, deco);
@@ -638,6 +642,101 @@
     if (pen || color) paintDrawbar();
   });
   $('#draw-custom').addEventListener('input', (e) => { setPref('inkColor', e.target.value); if (prefs.pen === 'eraser') setPref('pen', 'pen'); paintDrawbar(); });
+
+  /* ================= In-place editing (IR) =================
+     md/txt in the MD view: clicking a block reveals its Markdown source in place
+     (assets/md-ir.js); leaving it re-renders. Edits are saved as a new document
+     revision after a short pause, and every text anchor of this document is moved
+     to that revision with its shifted offsets. Anchored text cannot be edited. */
+  const irLive = new Map();          // node id → { start, end } in the current S.text (utf16)
+  let irDirty = false, irTimer = null, irSaving = null;
+  /* Where a text-anchored node points in the text on screen, or null when it does not. */
+  function liveAnchor(n) {
+    if (irLive.has(n.id)) return irLive.get(n.id);
+    const src = meta(n).source;
+    if (src?.selector?.type !== 'text' || !S.doc || src.document_id !== S.doc.id || src.revision_id !== S.doc.current_revision_id) return null;
+    if (src.selector.unit === 'utf16') return { start: src.selector.start, end: src.selector.end };
+    const cps = Array.from(S.text);
+    return { start: cps.slice(0, src.selector.start).join('').length, end: cps.slice(0, src.selector.end).join('').length };
+  }
+  const textNodes = () => S.nodes.filter((n) => n.document_id === S.doc?.id && meta(n).source?.selector?.type === 'text');
+  /* Protected ranges inside [start, end): text anchors by offset; quote or heading anchors via their mark. */
+  function irProtected(start, end, blockEl) {
+    const out = [];
+    textNodes().forEach((n) => { const a = liveAnchor(n); if (a && a.start < end && a.end > start) out.push({ id: n.id, start: a.start, end: a.end }); });
+    const source = S.text.slice(start, end);
+    $$('mark.anchor', blockEl).forEach((m) => {
+      if (out.some((r) => r.id === m.dataset.node)) return;
+      const words = collapse(m.textContent).split(' ').filter(Boolean).map(escRe);
+      const hit = words.length && new RegExp(words.join('(?:[\\s*_`~]|\\\\)+')).exec(source);
+      // A mark that cannot be located in the source protects the whole block.
+      out.push(hit ? { id: m.dataset.node, start: start + hit.index, end: start + hit.index + hit[0].length } : { id: m.dataset.node, start, end });
+    });
+    return out;
+  }
+  function irCommit({ start, end, text, ranges, cancelled }) {
+    if (!cancelled && S.doc) {
+      const delta = text.length - (end - start);
+      const moved = new Map(ranges.map((r) => [r.id, r]));
+      textNodes().forEach((n) => {
+        const a = liveAnchor(n);
+        if (!a) return;
+        if (moved.has(n.id)) irLive.set(n.id, { start: moved.get(n.id).start, end: moved.get(n.id).end });
+        else if (a.start >= end) irLive.set(n.id, { start: a.start + delta, end: a.end + delta });
+        else irLive.set(n.id, { ...a });
+      });
+      S.text = S.text.slice(0, start) + text + S.text.slice(end);
+      irDirty = true;
+      clearTimeout(irTimer); irTimer = setTimeout(() => irFlush().catch(fail), 1200);
+      $('#st-state').textContent = '未保存';
+    }
+    renderReader(true);
+  }
+  /* Save pending edits as a new revision, then re-point this document's text anchors at it. */
+  async function irFlush() {
+    clearTimeout(irTimer);
+    while (irSaving) await irSaving.catch(() => {});
+    if (!irDirty || !S.doc) return;
+    const doc = S.doc, text = S.text, live = new Map(irLive);
+    irDirty = false;
+    irSaving = (async () => {
+      const name = doc.source_filename || `${baseName(doc.title)}.${doc.format === 'txt' ? 'txt' : 'md'}`;
+      const form = new FormData();
+      form.append('file', new Blob([text], { type: doc.format === 'txt' ? 'text/plain' : 'text/markdown' }), name);
+      let saved;
+      try { saved = await sync(api.post(`/api/documents/${p(doc.id)}/revisions`, form)); }
+      catch (e) { irDirty = true; throw e; }
+      const updated = saved.document || doc;
+      Object.assign(doc, updated);
+      const listed = docOf(doc.id); if (listed && listed !== doc) Object.assign(listed, updated);
+      for (const [id, a] of live) {
+        const n = nodeOf(id);
+        if (!n) { irLive.delete(id); continue; }
+        const source = { ...meta(n).source, document_id: doc.id, revision_id: updated.current_revision_id,
+          selector: { type: 'text', start: a.start, end: a.end, unit: 'utf16' }, quote: text.slice(a.start, a.end),
+          prefix: text.slice(Math.max(0, a.start - 32), a.start), suffix: text.slice(a.end, a.end + 32) };
+        Object.assign(n, await sync(api.patch(`/api/nodes/${p(id)}`, { metadata: { ...meta(n), source }, revision: n.revision })));
+        if (irLive.get(id) === a) irLive.delete(id);   // newer edits replaced the entry: keep it
+      }
+    })();
+    try { await irSaving; } finally { irSaving = null; }
+    if (irDirty) irFlush().catch(fail);
+  }
+  // `var`: renderReader (declared earlier) checks it and may run before this line.
+  var irEditor = TLMMarkdownIR.create({
+    sheet,
+    enabled: () => S.connected && !S.modal && !!S.doc && TEXT_FORMATS.has(S.doc.format) && S.mode === 'md' && S.tool === 'select',
+    source: () => S.text,
+    protectedIn: irProtected,
+    commit: irCommit,
+    notify: (message) => toast(message, { ms: 3000 }),
+  });
+  window.addEventListener('beforeunload', (e) => {
+    irEditor.finish();
+    if (!irDirty) return;
+    irFlush().catch(() => {});
+    e.preventDefault(); e.returnValue = '';
+  });
 
   /* ================= Selection → ask popover ================= */
   const askEl = $('#ask');
@@ -1108,7 +1207,7 @@
 
   /* Pointer: drag node / pan surface / click-select */
   let drag = null;
-  const NO_DRAG = 'button, input, textarea, select, form, a, details, .answer, .bubble, .chat__log, .xpl__body, .minimap';
+  const NO_DRAG = 'button, input, textarea, select, form, a, details, .answer, .bubble, .chat__log, .xpl__body, .minimap, [data-title-view]';
   surface.addEventListener('pointerdown', (e) => {
     if (layoutBusy) return;
     if (e.button !== 0 || e.target.closest('.inspector')) return;
@@ -1240,6 +1339,19 @@
   const SUMMARY_RE = /(?:^|\n)[ \t>*_]*(?:\*\*)?(?:概况|概要|摘要|一句话总结|TL;?DR|Summary)(?:\*\*)?[ \t]*[:：][ \t]*((?:(?!\n[ \t]*\n)[\s\S])+?)\s*$/i;
   const AUTO_Q = /^(请解释这个知识点|请结合我圈出的疑点)/;
   const userAsked = (q) => !AUTO_Q.test(shownQuestion(q));
+  /* First prose paragraph of a Markdown answer, as inline Markdown (math kept),
+     clipped at a point that never cuts through a formula. */
+  function briefMarkdown(text, max = 220) {
+    const para = String(text || '').replace(/\r\n?/g, '\n').split(/\n\s*\n/)
+      .map((x) => x.trim()).find((x) => x && !/^(#{1,6}\s|\||```|~~~|\$\$|\\\[|>|<!--)/.test(x)) || '';
+    const line = para.replace(/^\s*(?:[-*+]|\d+[.)])\s+/gm, '').replace(/\s*\n\s*/g, ' ');
+    if (line.length <= max) return line;
+    let cut = max;
+    const open = /\$[^$]*$|\\\((?:(?!\\\)).)*$/.exec(line.slice(0, cut));
+    if (open) cut = open.index;
+    return line.slice(0, cut).trimEnd() + '…';
+  }
+  const inlineMd = (value) => inline(String(value || '')).replace(/<\/?p>/g, '');
   function splitAnswer(exp, n) {
     const text = String(exp.answer || '').trim();
     let brief = (exp.summary || '').trim();
@@ -1282,11 +1394,11 @@
     const branchLabel = { formula: '公式步骤', reasoning: '推理步骤', chart: '图表', question: '疑问', concept: '概念' }[m.branch_type];
     const kindLine = `<span class="kind ${sel ? 'ink' : ''}">${branchLabel || KIND[n.kind] || n.kind} · ${depthLabel(n)}${m.status === 'mastered' ? ' · 已掌握' : ''}</span>`;
     if (!sel) {
-      const sum = page ? splitAnswer(page, n).brief : (n.summary || n.content);
+      const sum = page ? (page.summary || briefMarkdown(page.answer)) : briefMarkdown(n.summary || n.content);
       const dots = pages.length ? `<span class="dots" title="${pages.length} 版解释">${pages.slice(-5).map(() => '<i class="on"></i>').join('')}</span>` : '';
       return `<div class="gnode ${m.status === 'mastered' ? 'mastered' : ''}" ${attrs} tabindex="0" role="button" aria-label="知识节点：${esc(n.title)}">
         <div class="gnode__head">${kindLine}<span class="src" title="${esc(src)}">${esc(src)}</span></div>
-        <div class="gnode__body"><h4>${esc(n.title)}</h4><div class="gnode__sum">${esc(clip(collapse(sum), 160))}</div>
+        <div class="gnode__body"><h4 class="md-inline">${inlineMd(n.title)}</h4><div class="gnode__sum md-inline">${inlineMd(sum)}</div>
         ${pages.length || chat.length ? `<div class="gnode__meta">${dots}${pages.length ? `<span>${pages.length} 版解释</span>` : ''}${chat.length ? `<span>${chat.length} 条对话</span>` : ''}</div>` : ''}
         ${run ? runLine(run) : ''}</div></div>`;
     }
@@ -1316,14 +1428,15 @@
         <button class="icon-btn" data-act="node-collapse" title="收起 (Esc)">${icon('close')}</button></div>
       <div class="gnode__scroll">
         <div class="gnode__body">
-          <input class="title-input" data-title value="${esc(n.title)}" maxlength="160" aria-label="节点标题">
+          <h4 class="title-view md-inline" data-title-view tabindex="0" role="button" title="点击编辑标题" aria-label="节点标题：${esc(n.title)}，点击编辑">${inlineMd(n.title)}</h4>
+          <input class="title-input" data-title value="${esc(n.title)}" maxlength="160" aria-label="节点标题" hidden>
         </div>
         <div class="xpl">
           ${run ? runLine(run) : ''}
           ${!run && ['failed', 'cancelled', 'interrupted'].includes(S.runs[n.id]?.state) ? '<p class="obstacle-error" role="alert">本次生成未完成，已保留上一份解释。可重新生成。</p>' : ''}
           ${pageBody}
           ${page || m.source?.fromNode ? `<div class="node-learning-actions">
-            ${page && canExplain ? `<button class="icon-btn" data-act="node-explain" title="重新生成" aria-label="重新生成" ${run ? 'disabled' : ''}>${icon('sparkle')}</button>` : ''}
+            ${page && canExplain ? `<button class="btn btn--sm" data-act="node-explain" title="重新生成解释" ${run ? 'disabled' : ''}>${icon('sparkle')}重新生成</button>` : ''}
             ${retell}${versionSwitch}${m.source?.fromNode ? '<button class="btn btn--sm" data-act="node-parent">↑ 返回上层</button>' : ''}
           </div>` : ''}
         </div>
@@ -1433,6 +1546,10 @@
       document_id = parent.document_id;
       source = { quote: origin.quote, prefix: origin.prefix || '', suffix: origin.suffix || '', fromNode: parent.id, ...(origin.expId ? { fromExp: origin.expId } : {}) };
     } else {
+      // Offsets are taken from the text on screen: save pending edits first so they
+      // belong to the revision the node will reference.
+      await irFlush();
+      origin.revisionId = S.doc.current_revision_id;
       parent = sectionNodeOf(origin.block) || null;
       document_id = S.doc.id;
       source = textAnchor(origin);
@@ -1510,6 +1627,26 @@
     if (e.target.matches('[data-content]')) queueSave(n, 'content', e.target.value, nEl);
   });
   nodesEl.addEventListener('toggle', () => drawEdges(), true);
+  /* Card title: rendered (math, inline Markdown) until clicked, then its source is edited in place. */
+  function editTitle(view) {
+    const input = view.parentElement.querySelector('[data-title]');
+    view.hidden = true; input.hidden = false;
+    input.focus(); input.setSelectionRange(input.value.length, input.value.length);
+  }
+  nodesEl.addEventListener('click', (e) => { const v = e.target.closest('[data-title-view]'); if (v) editTitle(v); });
+  nodesEl.addEventListener('keydown', (e) => {
+    const v = e.target.closest?.('[data-title-view]');
+    if (v && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); editTitle(v); }
+    if (e.target.matches?.('[data-title]') && (e.key === 'Enter' || e.key === 'Escape')) { e.preventDefault(); e.target.blur(); }
+  });
+  nodesEl.addEventListener('focusout', (e) => {
+    if (!e.target.matches?.('[data-title]')) return;
+    const view = e.target.parentElement.querySelector('[data-title-view]');
+    if (!view) return;
+    view.innerHTML = inlineMd(e.target.value);
+    e.target.hidden = true; view.hidden = false;
+    drawEdges();
+  });
   nodesEl.addEventListener('click', action(async (e) => {
     const child = e.target.closest('.u-q[data-child]');
     if (child && getSelection().isCollapsed) { selectNode(child.dataset.child, { center: true }); return; }
@@ -2341,6 +2478,8 @@
     return read();
   }
   async function openDocument(id) {
+    irEditor.finish();
+    if (S.doc && S.doc.id !== id) await irFlush();
     const current = ++revision;
     const detail = await sync(api.get(`/api/documents/${p(id)}`));
     const doc = detail.document || detail;

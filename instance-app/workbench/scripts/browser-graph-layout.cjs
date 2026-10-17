@@ -31,7 +31,7 @@ const output = path.resolve(__dirname, '../.work/graph-layout');
     const nodes = await page.evaluate(() => window.TLM_WS.state.nodes);
     for (const n of nodes) if (n.parent_id && byId[n.parent_id]) {
       const parent = byId[n.parent_id];
-      assert(parent.y + parent.height < byId[n.id].y, 'Parent must be above child');
+      assert(parent.x + parent.width < byId[n.id].x, 'Parent must be left of child');
     }
     return values;
   }
@@ -107,7 +107,7 @@ const output = path.resolve(__dirname, '../.work/graph-layout');
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.click('[data-act="auto-layout"]'); await waitLayout(); await assertGeometry();
     assert.deepEqual(errors, []);
-    console.log('PASS: preview/cancel preserve positions; accept and no-change results arrange cards; animation, persistence, no overlaps, root-to-leaf order, mobile and reduced motion');
+    console.log('PASS: preview/cancel preserve positions; accept and no-change results arrange cards; animation, persistence, no overlaps, left-to-right root-to-leaf order, mobile and reduced motion');
   } finally {
     if (docId) await page.evaluate(id => RuntimeAPI.del('/api/documents/' + id), docId);
     await browser.close();

@@ -120,3 +120,27 @@ select.input { appearance: auto; }
 @media (prefers-reduced-motion: reduce) {
   .world.animate .gnode { transition: none; }
 }
+
+/* ---------- In-place (IR) editing of the reader ---------- */
+.reader:not(.tool-highlight):not(.tool-draw) .doc [data-b][data-start] { cursor: text; }
+.doc .ir-edit { position: relative; }
+.ir-input {
+  display: block; width: 100%; box-sizing: border-box; margin: 0; padding: 4px 8px;
+  border: 0; border-radius: var(--r, 4px); outline: 1px solid var(--line); background: var(--paper-2);
+  white-space: pre-wrap; overflow: hidden; resize: none; tab-size: 4;
+}
+.ir-input:focus { outline: 1.5px solid var(--ink); }
+.doc td.ir-edit .ir-input, .doc th.ir-edit .ir-input { min-width: 6em; }
+.doc pre.ir-edit { padding: 0; background: none; border: 0; }
+
+/* ---------- Math / Markdown inside cards ---------- */
+.md-inline .katex { font-size: 1em; }
+.gnode__body h4.md-inline code, .gnode__sum code { font: .9em var(--mono); background: var(--paper-2); padding: 0 3px; }
+.title-view { margin: 0 0 4px; font: 600 15px/1.35 var(--sans); cursor: text; overflow-wrap: anywhere; }
+.title-view:hover { background: var(--paper-2); border-radius: 3px; }
+.title-view:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.answer .math--display { display: block; margin: 6px 0; overflow-x: auto; overflow-y: hidden; }
+.answer .math-block .katex-display, .answer .math--display .katex-display { margin: 0; }
+
+/* Regenerate / back-to-parent sit on the card's text column, left-aligned. */
+.gnode.sel .node-learning-actions { justify-content: flex-start; padding: 6px 0 2px; margin: 0; }

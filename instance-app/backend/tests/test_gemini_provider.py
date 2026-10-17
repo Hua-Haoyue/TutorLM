@@ -59,3 +59,24 @@ def test_structured_explanation_uses_native_json_mode():
     provider = GeminiProvider(api_base='https://example.test', api_key='test-key', model='gemini', transport=transport)
     result = provider.generate(GenerateRequest(kind='explanation', prompt='Explain as JSON', json_object=True))
     assert json.loads(result.text)['answer'] == 'x ≠ 0'
+
+
+def test_numeric_enums_are_not_sent_to_gemini():
+    """Gemini rejects non-string enums with HTTP 400; the caller still validates the value."""
+    schema = {'type': 'object', 'required': ['kind', 'correct_index'], 'properties': {
+        'kind': {'type': 'string', 'enum': ['a', 'b']},
+        'correct_index': {'type': 'integer', 'enum': [0, 1]},
+        'items': {'type': 'array', 'items': {'type': 'integer', 'enum': [1, 2, 3]}},
+    }}
+    sent = {}
+
+    def transport(request, timeout):
+        sent.update(json.loads(request.data)['generationConfig']['responseSchema'])
+        return 200, json.dumps({'candidates': [{'finishReason': 'STOP', 'content': {'parts': [
+            {'text': '{"kind":"a","correct_index":1}'}]}}]}).encode()
+    provider = GeminiProvider(api_base='https://example.test', api_key='test-key', model='gemini', transport=transport)
+    provider.generate(GenerateRequest(kind='feynman', prompt='Quiz', json_object=True, json_schema=schema))
+    assert sent['properties']['kind']['enum'] == ['a', 'b']
+    assert 'enum' not in sent['properties']['correct_index']
+    assert 'enum' not in sent['properties']['items']['items']
+    assert schema['properties']['correct_index']['enum'] == [0, 1], 'the caller schema is not modified'

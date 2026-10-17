@@ -10,6 +10,22 @@ from backend.domain.errors import ProviderUnavailable
 from backend.infrastructure.providers.openai_compatible import Transport, build_transport
 
 
+def gemini_schema(schema):
+    """Copy of a JSON schema that Gemini's ``responseSchema`` accepts.
+
+    Gemini only supports string ``enum`` values; a numeric enum (for example an
+    answer index ``[0, 1]``) makes the whole request fail with HTTP 400. Such
+    enums are dropped here. The schema is a generation hint only: callers keep
+    validating the returned values themselves, so the constraint is not lost.
+    """
+    if isinstance(schema, dict):
+        return {key: gemini_schema(value) for key, value in schema.items()
+                if not (key == 'enum' and not (isinstance(value, list) and all(isinstance(v, str) for v in value)))}
+    if isinstance(schema, list):
+        return [gemini_schema(item) for item in schema]
+    return schema
+
+
 class GeminiProvider:
     def __init__(self, *, api_base: str, api_key: str, model: str,
                  timeout_seconds: float = 60, max_tokens: int = 2048,
@@ -39,7 +55,7 @@ class GeminiProvider:
         if request.json_object:
             body['generationConfig']['responseMimeType'] = 'application/json'
             if request.json_schema:
-                body['generationConfig']['responseSchema'] = request.json_schema
+                body['generationConfig']['responseSchema'] = gemini_schema(request.json_schema)
         http_request = urllib.request.Request(
             base + '/models/' + model + ':generateContent',
             data=json.dumps(body, ensure_ascii=False).encode('utf-8'), method='POST',
