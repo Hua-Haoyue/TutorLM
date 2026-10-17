@@ -1004,7 +1004,6 @@
     layoutBusy = true;
     if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); }
     try {
-      const beforeLayout = await layoutPlugin?.beforeAutoLayout(pool);
       const target = computeLayout(true);
       const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
       world.classList.toggle('animate', !reduced);
