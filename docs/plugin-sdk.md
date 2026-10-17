@@ -13,9 +13,10 @@
 | `documents` | 无（文档基础服务由 Runtime 提供） | 无 |
 | `explanations` | `explanation.v1` | `explanation` |
 | `knowledge-narration` | `narration.v1`、`retelling.v1` | `narration`、`retelling` |
+| `card-clear` | 无模型工作流；提供文档卡片批量删除与撤销路由 | 无 |
 
 环境变量 `TUTORLM_ENABLED_PLUGINS` 使用逗号分隔的插件 ID，默认值为
-`documents,explanations,knowledge-narration`。可以仅启用 `documents` 或
+`documents,explanations,knowledge-narration,card-clear`。可以仅启用 `documents` 或
 `documents,explanations`；未知 ID、缺失或禁用的依赖、循环依赖、重复任务 kind、
 缺失工作流实现、Host API 版本不匹配和未知能力均阻止应用装配。
 

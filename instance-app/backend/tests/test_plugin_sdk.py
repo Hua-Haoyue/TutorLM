@@ -35,11 +35,11 @@ def profile(client, headers, revision=0):
 
 def test_builtin_sdk_discovery(client):
     registry = client.app.state.tutorlm.plugins
-    assert registry.order == ('documents', 'explanations', 'knowledge-narration')
+    assert registry.order == ('documents', 'explanations', 'knowledge-narration', 'card-clear')
     assert registry.workflow('explanation').instance.__class__.__module__ == 'backend.plugins.explanations'
     assert registry.workflow('retelling').declaration.id == 'retelling.v1'
     public = client.get('/api/plugins').json()
-    assert public['count'] == 3
+    assert public['count'] == 4
     assert {item['kind'] for item in public['workflows']} == {'explanation', 'narration', 'retelling'}
     assert public['host_api_version'] == 1
 
