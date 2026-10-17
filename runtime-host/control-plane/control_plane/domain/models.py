@@ -260,12 +260,12 @@ class Workspace:
 
         return self.storage_layout == STORAGE_LAYOUT_CONTENT_ONLY
 
-    def to_dict(self, idle_seconds: int) -> dict[str, Any]:
+    def to_dict(self, idle_seconds: int | None) -> dict[str, Any]:
         payload = {
             'workspace_id': self.workspace_id, 'user_id': self.user_id,
             'title': self.title, 'state': self.state,
             'created_at': self.created_at, 'last_used_at': self.last_used_at,
-            'expires_at': self.last_used_at + idle_seconds,
+            'expires_at': (self.last_used_at + idle_seconds) if idle_seconds is not None else None,
             'data_directory': self.data_directory,
             'storage_layout': self.storage_layout,
         }
@@ -279,7 +279,7 @@ class InvitationKind(StrEnum):
 
     #: 系统码：``TLM-SYS-`` 前缀，可重复使用直到撤销，入场获得最高优先。
     SYSTEM = "system"
-    #: 分享码：``TLM-SHARE-`` 前缀，绑定源项目，只授予普通 trial 能力。
+    #: 分享码：``TLM-SHARE-`` 前缀，仅授权复制源项目，不授予计算权限。
     SHARE = "share"
 
 

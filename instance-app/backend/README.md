@@ -21,9 +21,9 @@
   浏览器端 PDF.js 引擎桥接和自托管资源导出已实现，完整工作台与真实浏览器集成尚未完成。
 - TeX 编译在本仓库**无安全执行器**：默认 `tex_compile_unavailable`，路由返回 **503**（见设计 §16
   与 [`../../docs/tex-compilation-security.md`](../../docs/tex-compilation-security.md)）。
-- managed 形态的**卷初始化 / 克隆 / 重绑（clone/rebind）与布局标记**由外层控制面在容器外接通；
-  内层就绪判定已实现，但完整 bootstrap 流程尚未 outer 接通，不能作为已可用能力依赖。
-- 完整学习工作台未 wire：`frontend/` 只提供可显式挂载的阅读器与租约/邀请码模块。
+- managed 形态的卷初始化、克隆重绑和受控 session 引导已按 [v4](../../contracts/instance-runtime-v4.md)
+  接通并通过隔离 Docker 验证；应用会话仍在卷外，业务请求仍需应用 Bearer。
+- 完整工作台位于 `../workbench/`，通用模块位于 `../frontend/`，部署时需要一起交付。
 
 ## 分层
 

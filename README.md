@@ -53,10 +53,14 @@ node --test instance-app/frontend/tests/*.test.js
 CLI 用法见 [docs/cli.md](docs/cli.md)。
 
 Docker 联调见 [runtime-host/deploy/README.md](runtime-host/deploy/README.md)。
-容器内后端已可本地启动 HTTP Host，PDF 文本抽取与 PDF.js 桥接已实现（见 [instance-app/README.md](instance-app/README.md) 与[instance-app/backend/README.md](instance-app/backend/README.md)）。完整工作台仍未接线，TeX 安全执行器未提供（编译返回 503），managed 卷初始化、可信会话引导与克隆重绑尚待外层联调，不能视为完整上线交付物。
+容器内后端与工作台已接通持久项目、系统邀请码、唯一字符串分享及受控应用会话引导，
+卷初始化与克隆重绑已通过本地隔离 Docker 联调；协议见 [v4](contracts/instance-runtime-v4.md)。
+PDF 文本抽取与 PDF.js 桥接已实现。TeX 安全执行器仍未提供（编译返回 503），
+公网 TLS、安全配置与生产环境验收需独立完成，不能把本地测试当作上线保证。
 
 ## 协作入口
 
+- [已实现功能总览与当前限制](docs/feature-status.md)
 - [工作台前端实现与启动](instance-app/workbench/README.md)
 
 - [架构与责任边界](docs/architecture.md)
@@ -71,6 +75,7 @@ Docker 联调见 [runtime-host/deploy/README.md](runtime-host/deploy/README.md)�
 - [实例运行协议 v1](contracts/instance-runtime-v1.md)
 - [持久实例协议 v2](contracts/instance-runtime-v2.md)
 - [持久实例协议 v3](contracts/instance-runtime-v3.md)
+- [受控会话、邀请码与分享协议 v4](contracts/instance-runtime-v4.md)
 - [网关与租约协议 v1](contracts/gateway-lease-v1.md)
 - [网关与租约协议 v2](contracts/gateway-lease-v2.md)
 

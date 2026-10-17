@@ -401,7 +401,8 @@ def test_persistent_data_dir_matches_the_actual_volume_mount(system):
     issued = open_workspace(client, workspace).json()['lease']
     slot = state.store.require_slot(issued['slot_id'])
     spec = state.lifecycle._build_spec(slot, issued['generation'])
-    assert spec.env['TUTORLM_DATA_DIR'] == spec.mount_path
+    assert spec.env['TUTORLM_DATA_DIR'] == spec.mount_path + '/' + workspace['data_directory']
+    assert workspace['data_directory'] == f"users/{workspace['user_id']}/workspaces/{workspace['workspace_id']}"
     assert spec.env['TUTORLM_WORKSPACE_ID'] == workspace['workspace_id']
     assert spec.volume_must_exist is True
 

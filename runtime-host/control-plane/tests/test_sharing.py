@@ -54,7 +54,7 @@ def make_shareable(state, workspace, contents=(("notes.md", b"hello"),)):
         )
     )
     for key, data in contents:
-        state.adapter.write_volume(stored.volume_name, key, data)
+        state.adapter.write_volume(stored.volume_name, f'{stored.data_directory}/{key}', data)
     state.store.mark_workspace_layout(workspace["workspace_id"], STORAGE_LAYOUT_CONTENT_ONLY)
     return stored
 
@@ -122,7 +122,7 @@ def test_import_creates_independent_copy_and_never_shares_bytes(system):
         assert imported["workspace_id"] != workspace["workspace_id"]
 
         copy = state.store.require_workspace(imported["workspace_id"])
-        assert copy.source_workspace_id != workspace["workspace_id"]
+        assert copy.source_workspace_id == workspace["workspace_id"]
         # UUID 专属目录，不是旧卷根。
         assert copy.data_directory == f"users/{copy.user_id}/workspaces/{copy.workspace_id}"
         assert copy.volume_name != stored.volume_name
@@ -132,7 +132,7 @@ def test_import_creates_independent_copy_and_never_shares_bytes(system):
 
         # 修改副本不影响源。
         adapter.write_volume(copy.volume_name, f"{copy.data_directory}/notes.md", b"changed")
-        assert adapter.read_volume(stored.volume_name, "notes.md") == b"original"
+        assert adapter.read_volume(stored.volume_name, f"{stored.data_directory}/notes.md") == b"original"
         # 底层 bytes 字典也是独立的。
         assert adapter._volume_files[copy.volume_name] is not adapter._volume_files[stored.volume_name]
     finally:
@@ -211,7 +211,7 @@ def test_import_keeps_source_volume_on_copy_failure(system):
         assert response.status_code == 502
         assert response.json()["error"]["code"] == "workspace_copy_failed"
         # 源项目与其内容完整保留。
-        assert adapter.read_volume(stored.volume_name, "notes.md") == b"original"
+        assert adapter.read_volume(stored.volume_name, f"{stored.data_directory}/notes.md") == b"original"
         assert state.store.require_workspace(workspace["workspace_id"]).state == "active"
         # 失败的副本不会可见（不是 active）。
         failed = [
@@ -260,7 +260,7 @@ def test_reconcile_marks_interrupted_copy_unavailable_without_touching_source(sy
         report = state.sharing.reconcile()
         assert "copy-in-flight" in report["cleaned"]
         assert state.store.require_workspace(destination_id).state == "failed"
-        assert adapter.read_volume(stored.volume_name, "notes.md") == b"original"
+        assert adapter.read_volume(stored.volume_name, f"{stored.data_directory}/notes.md") == b"original"
         assert state.store.require_workspace(workspace["workspace_id"]).state == "active"
     finally:
         viewer.close()
@@ -411,8 +411,8 @@ def test_share_code_cannot_be_used_as_a_source_access_token(system):
         viewer.close()
 
 
-def test_imported_copy_can_be_opened_after_import_in_invitation_only(system):
-    """分享导入后记录普通 trial grant，invitation_only 下仍可打开副本。"""
+def test_imported_copy_still_requires_system_invitation_when_invitation_only(system):
+    """Sharing copies content, never bypasses invitation-only slot admission."""
 
     client, state, adapter = system
     workspace = create_workspace(client)
@@ -434,9 +434,14 @@ def test_imported_copy_can_be_opened_after_import_in_invitation_only(system):
         opened = viewer.post(
             "/control/leases", json={"workspace_id": imported["workspace_id"]}
         )
+        assert opened.status_code == 403
+        assert opened.json()['error']['code'] == 'invitation_required'
+        invitation, system_code = state.invitations.issue_system_code(label='test')
+        opened = viewer.post('/control/leases', json={
+            'workspace_id': imported['workspace_id'], 'invitation_code': system_code,
+        })
         assert opened.status_code == 201
-        assert opened.json()["lease"]["priority"] == 0
-        assert opened.json()["lease"]["workspace_id"] == imported["workspace_id"]
+        assert opened.json()['lease']['priority'] == 100
     finally:
         viewer.close()
 
@@ -522,7 +527,7 @@ def test_leaked_helper_keeps_source_pinned_and_target_invisible(system):
     # 仍在 PREPARING -> GC 仍会因 pin 而不删源项目卷。
     assert copy.state == "preparing"
     assert state.store.claim_expired_workspaces(0) == []
-    assert adapter.read_volume(stored.volume_name, "notes.md") == b"original"
+    assert adapter.read_volume(stored.volume_name, f"{stored.data_directory}/notes.md") == b"original"
     destination = state.store.require_workspace(copy.destination_workspace_id)
     assert destination.state == "failed"
 
@@ -564,7 +569,7 @@ def test_failed_copy_destination_is_reclaimed_by_storage_gc(system):
     assert state.store.require_workspace(destination_id).state == "deleted"
     assert not adapter.volume_exists(destination_volume)
     # 源一直完好。
-    assert adapter.read_volume(stored.volume_name, "notes.md") == b"original"
+    assert adapter.read_volume(stored.volume_name, f"{stored.data_directory}/notes.md") == b"original"
 
 
 def test_source_is_pinned_before_source_compute_is_stopped(system):
@@ -607,7 +612,7 @@ def test_source_is_pinned_before_source_compute_is_stopped(system):
 
     assert observed["pinned_before_stop"] is True
     assert observed["claimed"] == []
-    assert adapter.read_volume(stored.volume_name, "notes.md") == b"original"
+    assert adapter.read_volume(stored.volume_name, f"{stored.data_directory}/notes.md") == b"original"
 
 
 def _issue_share_code(client, workspace):
@@ -652,7 +657,7 @@ def test_reconcile_defers_when_helper_may_still_be_running(system):
     assert report["cleaned"] == []
     # 源仍被 pin，目标不可见。
     assert state.store.claim_expired_workspaces(0) == []
-    assert adapter.read_volume(stored.volume_name, "notes.md") == b"original"
+    assert adapter.read_volume(stored.volume_name, f"{stored.data_directory}/notes.md") == b"original"
     assert state.store.require_workspace(destination_id).state == "copying"
 
 

@@ -115,7 +115,7 @@
     localStorage.setItem(PREF_KEY, JSON.stringify(prefs));
     applyPrefs();
     if (k === 'links' || k === 'minimap') { drawConnector(); drawMinimap(); }
-    if (k === 'follow' && v) followRebase();
+    if (k === 'follow' && v) followScroll();
     if (k === 'readFont') { updateStatus(); drawConnector(); }
   }
   function openPrefs() {
@@ -227,75 +227,26 @@
       { label: '取消', run: (c) => { c(); res(false); } },
       { label: ok, primary: true, run: (c) => { c(); res(true); } }] });
   });
-  const promptModal = (title, label, value = '', max = 120) => new Promise((res) => {
+  const promptModal = (title, label, value = '', max = 120, allowEmpty = false) => new Promise((res) => {
     const { root } = modal({ title, body: `<label class="field"><span class="label">${label}</span><input class="input" id="pm-in" maxlength="${max}" value="${esc(value)}"></label>`,
-      actions: [{ label: '取消', run: (c) => { c(); res(null); } }, { label: '确定', primary: true, run: (c, r) => { const v = $('#pm-in', r).value.trim(); if (!v) return; c(); res(v); } }] });
+      actions: [{ label: '取消', run: (c) => { c(); res(null); } }, { label: '确定', primary: true, run: (c, r) => { const v = $('#pm-in', r).value.trim(); if (!v && !allowEmpty) return; c(); res(v); } }] });
     $('#pm-in', root).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('.btn--primary', root).click(); } });
   });
 
   /* ================= Markdown (subset, escape-first) =================
      Top-level blocks get data-b="<index>" so anchors survive re-render. */
   function mathHtml(m) {
+    if (window.katex) return katex.renderToString(m, { throwOnError: false, trust: false, strict: 'ignore', output: 'html' });
     return esc(m)
       .replace(/\^(\{[^}]*\}|[\wᵀ]+)/g, (_, x) => '<sup>' + x.replace(/[{}]/g, '') + '</sup>')
       .replace(/_(\{[^}]*\}|[A-Za-z0-9]+)/g, (_, x) => '<sub>' + x.replace(/[{}]/g, '') + '</sub>');
   }
-  function inline(s) {
-    const slots = [];
-    const hold = (html) => { slots.push(html); return '\u0000' + (slots.length - 1) + '\u0000'; };
-    s = s.replace(/`([^`]+)`/g, (_, c) => hold('<code>' + esc(c) + '</code>'));
-    s = s.replace(/\$([^$\n]+)\$/g, (_, m) => hold('<span class="math">' + mathHtml(m) + '</span>'));
-    s = esc(s)
-      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-      .replace(/(^|[^*\w])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
-      .replace(/(^|[^_\w])_([^_\s][^_]*)_(?![\w])/g, '$1<em>$2</em>');
-    return s.replace(/\u0000(\d+)\u0000/g, (_, i) => slots[i]);
-  }
-  function renderMd(raw, { blocks = true } = {}) {
-    const lines = String(raw || '').replace(/\r\n?/g, '\n').split('\n');
-    const out = [];
-    let i = 0, b = 0;
-    const push = (tag, html, extra = '') => { out.push(`<${tag}${blocks ? ` data-b="${b}"` : ''}${extra}>${html}</${tag}>`); b++; };
-    const isBlockStart = (l) => /^(#{1,6}\s|```|>|\$\$|\s*[-*]\s|\s*\d+\.\s|---+\s*$)/.test(l);
-    while (i < lines.length) {
-      const l = lines[i];
-      let m;
-      if (!l.trim()) { i++; continue; }
-      if (l.trimStart().startsWith('```')) {
-        const buf = []; i++;
-        while (i < lines.length && !lines[i].trimStart().startsWith('```')) buf.push(lines[i++]);
-        i++; push('pre', esc(buf.join('\n'))); continue;
-      }
-      if (l.trim().startsWith('$$')) {
-        const buf = [l.trim().slice(2)]; i++;
-        if (!buf[0].includes('$$')) { while (i < lines.length && !lines[i].includes('$$')) buf.push(lines[i++]); if (i < lines.length) buf.push(lines[i++]); }
-        push('div', mathHtml(buf.join(' ').replace(/\$\$/g, '').trim()), ' class="math-block"'); continue;
-      }
-      if ((m = l.match(/^(#{1,6})\s+(.*)/))) {
-        const nm = m[2].match(/^(\d+(?:\.\d+)+)\s+(.*)/);
-        const html = nm ? `<span class="num">${esc(nm[1])}</span> ${inline(nm[2])}` : inline(m[2]);
-        push(m[1].length >= 3 ? 'h3' : 'h2', html, blocks ? ` id="h-${b}"` : ''); i++; continue;
-      }
-      if (/^---+\s*$/.test(l)) { out.push('<hr>'); i++; continue; }
-      if (l.startsWith('>')) {
-        const buf = [];
-        while (i < lines.length && lines[i].startsWith('>')) buf.push(lines[i++].replace(/^>\s?/, ''));
-        push('blockquote', inline(buf.join(' '))); continue;
-      }
-      if (/^\s*([-*]|\d+\.)\s+/.test(l)) {
-        const ordered = /^\s*\d+\./.test(l), buf = [];
-        while (i < lines.length && /^\s*([-*]|\d+\.)\s+/.test(lines[i])) buf.push('<li>' + inline(lines[i++].replace(/^\s*([-*]|\d+\.)\s+/, '')) + '</li>');
-        push(ordered ? 'ol' : 'ul', buf.join('')); continue;
-      }
-      const buf = [l]; i++;
-      while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i])) buf.push(lines[i++]);
-      push('p', inline(buf.join(' ')));
-    }
-    return out.join('');
-  }
+  const markdown = TutorMarkdown.createRenderer({ math: mathHtml });
+  const inline = value => markdown.inline(value);
+  const renderMd = (raw, options) => markdown.render(raw, options);
   const isMarkdown = (d) => !d || (d.format ? d.format === 'md' : !/\.txt$/i.test(d.source_filename || d.title || ''));
-  const renderTxt = (raw) => String(raw || '').replace(/\r\n?/g, '\n').split(/\n{2,}/).filter((x) => x.trim())
-    .map((x, i) => `<p data-b="${i}">${esc(x.trim()).replace(/\n/g, '<br>')}</p>`).join('');
+  const renderTxt = (raw) => [...String(raw || '').matchAll(/\S[\s\S]*?(?=\r?\n\s*\r?\n|$)/g)]
+    .map((m, i) => `<p data-b="${i}" data-start="${m.index}" data-end="${m.index + m[0].length}">${esc(m[0].trim()).replace(/\r?\n/g, '<br>')}</p>`).join('');
   const wordCount = (raw) => ((raw.match(/[㐀-鿿]/g) || []).length + (raw.match(/[A-Za-z0-9_]+/g) || []).length);
 
   /* ================= Reader ================= */
@@ -317,6 +268,7 @@
   }
   function renderReader(keepScroll) {
     const top = scroller.scrollTop;
+    resetFollowPosition();
     hideAsk();
     syncViewSeg();
     if (!S.doc) {
@@ -346,10 +298,23 @@
       }
       applyMarks();
       paintInk();
+      renderVisualOriginal().catch(fail);
     }
     scroller.scrollTop = keepScroll ? top : 0;
-    followRebase();
+    resetFollowPosition();
     updateStatus(); drawConnector();
+  }
+  let visualObjectURL = null;
+  async function renderVisualOriginal() {
+    const source = S.nodes.find(n => n.document_id === S.doc?.id && meta(n).visual_source?.selector?.type === 'whole-image')?.metadata.visual_source;
+    if (!source) return;
+    const docId = S.doc.id;
+    const bytes = await api.bytes(`/api/documents/${p(docId)}/artifacts/${p(source.artifact_id)}/source`);
+    if (S.doc?.id !== docId || S.mode === 'raw') return;
+    const image = document.createElement('img'); image.className = 'visual-original'; image.alt = S.doc.title;
+    if (visualObjectURL) URL.revokeObjectURL(visualObjectURL);
+    visualObjectURL = URL.createObjectURL(new Blob([bytes], { type: 'image/png' })); image.src = visualObjectURL;
+    sheet.querySelector('.visual-original')?.remove(); sheet.appendChild(image);
   }
   /* Layout view: split rendered blocks into fixed-height pages (no PDF parsing involved). */
   function paginate() {
@@ -419,9 +384,20 @@
         m.className = 'anchor' + (n.id === S.selected ? ' on' : '');
         m.dataset.node = n.id; m.title = '知识节点：' + n.title;
       };
-      if (src && src.quote && !src.fromNode) wrapQuote(src.block, src.quote, deco);
+      if (src?.selector?.type === 'text') {
+        if (src.revision_id !== S.doc.current_revision_id) return;
+        const at = src.selector.unit === 'utf16' ? src.selector.start : Array.from(S.text).slice(0, src.selector.start).join('').length;
+        const block = $$('[data-b]', sheet).find(el => Number(el.dataset.start) <= at && Number(el.dataset.end) > at);
+        if (!block) return;
+        const raw = S.text.slice(Number(block.dataset.start), at), quote = collapse(src.quote);
+        const ordinal = [...raw.matchAll(new RegExp(escRe(src.quote), 'g'))].length;
+        let from = 0, range = null;
+        for (let i = 0; i <= ordinal; i++) { range = textRange(block, quote, from); if (!range) break; from = range.idx + quote.length; }
+        if (range) wrapRange(range, deco);
+      }
+      else if (src && src.quote && !src.fromNode) wrapQuote(src.block, src.quote, deco);
       else if (src && src.selector) return;
-      else if (!src) wrapQuote(null, n.title, deco, 'h2[data-b], h3[data-b]');
+      else if (!src) wrapQuote(null, n.title, deco, 'h1[data-b], h2[data-b], h3[data-b], h4[data-b], h5[data-b], h6[data-b]');
     });
     if (S.find.open && S.find.q) runFind(false);
   }
@@ -435,7 +411,7 @@
   const syncAnchorState = () => $$('mark.anchor', sheet).forEach((m) => m.classList.toggle('on', m.dataset.node === S.selected));
   function sectionOf(block) {
     let label = '';
-    $$('h2[data-b], h3[data-b]', sheet).forEach((h) => { if (Number(h.dataset.b) <= block) label = collapse(h.textContent); });
+    $$('h1[data-b], h2[data-b], h3[data-b], h4[data-b], h5[data-b], h6[data-b]', sheet).forEach((h) => { if (Number(h.dataset.b) <= block) label = collapse(h.textContent); });
     return label;
   }
   /* Derived section node that owns a block: the node titled like the nearest preceding heading. */
@@ -462,7 +438,7 @@
     $('#st-words').textContent = (S.doc ? wordCount(S.text) : 0).toLocaleString() + ' 字';
     let sec = '';
     const y = scroller.getBoundingClientRect().top + 60;
-    $$('h2[data-b], h3[data-b]', sheet).forEach((h) => { if (h.getBoundingClientRect().top <= y) sec = collapse(h.textContent); });
+    $$('h1[data-b], h2[data-b], h3[data-b], h4[data-b], h5[data-b], h6[data-b]', sheet).forEach((h) => { if (h.getBoundingClientRect().top <= y) sec = collapse(h.textContent); });
     $('#st-section').textContent = sec ? '§ ' + clip(sec, 36) : (S.doc ? baseName(S.doc.title) : '');
     drawMinimap();
   }
@@ -480,14 +456,14 @@
       placeholder()?.replaceWith(el);
       applyMarks(); paintInk();
       scroller.scrollTop = scrollTop;
-      followRebase();
+      resetFollowPosition();
       updateStatus(); drawConnector();
     };
     if (pdfv?.key === key) { done(pdfv.el); return; }
     const token = ++pdfToken;
     try {
       if (pdfBytes?.rev !== rev) pdfBytes = { rev, data: await sync(api.bytes(`/api/documents/${p(doc.id)}/source?revision_id=${p(rev)}`)) };
-      const { openPdfView } = await import(new URL('assets/pdf-view.js', document.baseURI).href);
+      const { openPdfView } = await import(new URL('assets/pdf-view.js?v=obstacles-20261017-r2', document.baseURI).href);
       const el = document.createElement('div');
       el.className = 'pdfv';
       const width = Math.round(Math.min(760, sheet.clientWidth || 760));
@@ -665,10 +641,14 @@
     let r = range;
     if (blockOf(range.endContainer) !== startB) { r = range.cloneRange(); r.setEnd(startB, startB.childNodes.length); }
     let quote = r.toString().trim();
-    if (quote.length < 2) return null;
-    if (quote.length > 500) quote = quote.slice(0, 500);
+    if (quote.length < 1) return null;
+    if (quote.length > 6000) return null;
     const block = Number(startB.dataset.b);
-    return { origin: { kind: 'doc', block, quote, label: sectionOf(block) }, rect: range.getBoundingClientRect() };
+    const before = r.cloneRange(); before.selectNodeContents(startB); before.setEnd(r.startContainer, r.startOffset);
+    const after = r.cloneRange(); after.selectNodeContents(startB); after.setStart(r.endContainer, r.endOffset);
+    return { origin: { kind: 'doc', block, quote, prefix: before.toString().slice(-32), suffix: after.toString().slice(0, 32),
+      sourceStart: Number(startB.dataset.start), sourceEnd: Number(startB.dataset.end), before: before.toString(), blockText: startB.textContent,
+      documentId: S.doc.id, revisionId: S.doc.current_revision_id, label: sectionOf(block) }, rect: range.getBoundingClientRect() };
   }
   const countHits = (q) => countIn(sheet.textContent, q);
   function countIn(text, q) {
@@ -684,6 +664,7 @@
     askEl.classList.toggle('from-node', origin.kind === 'node');
     $('#ask-quote').textContent = '“' + clip(collapse(origin.quote), 140) + '”';
     $('#ask-input').value = '';
+    $('#ask-object').value = origin.kind === 'visual' ? 'chart' : 'auto';
     const canExplain = S.kinds.has('explanation');
     $('#ask-form').hidden = !canExplain;
     if (origin.kind === 'pdf') {
@@ -707,7 +688,7 @@
   $('#ask-form').addEventListener('submit', action(async (e) => {
     e.preventDefault();
     if (!S.ask) return;
-    const origin = S.ask, q = $('#ask-input').value.trim();
+    const origin = { ...S.ask, branchType: $('#ask-object').value }, q = $('#ask-input').value.trim();
     hideAsk(); getSelection().removeAllRanges();
     const node = await createNodeFrom(origin);
     await explain(node, q);
@@ -715,7 +696,7 @@
   askEl.addEventListener('click', action(async (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (!act || !S.ask) return;
-    const origin = S.ask;
+    const origin = { ...S.ask, branchType: $('#ask-object').value };
     hideAsk();
     if (act === 'ask-extract') { const n = await createNodeFrom(origin); toast(`已提取为节点「${clip(n.title, 16)}」`); }
     if (act === 'ask-highlight') addHighlight(origin);
@@ -864,6 +845,13 @@
   }
   function ensureVisible(n) {
     const v = S.view, sw = surface.clientWidth, sh = surface.clientHeight, q = posOf(n);
+    if (innerWidth <= 700) {
+      const el = elOf(n), width = el?.offsetWidth || 280, height = el?.offsetHeight || 140;
+      v.z = Math.min(v.z, 1, (sw - 24) / width, (sh - 24) / height);
+      v.x = (sw - width * v.z) / 2 - q.x * v.z;
+      v.y = 12 - q.y * v.z;
+      applyView(); savePrefs(); return;
+    }
     const sx = q.x * v.z + v.x, sy = q.y * v.z + v.y;
     if (sx < 16 || sx + 340 * v.z > sw - 16 || sy < 16 || sy + 140 * v.z > sh - 16) {
       v.x = Math.min(40, sw - 360 * v.z) - q.x * v.z;
@@ -1026,22 +1014,20 @@
   });
   mmEl?.addEventListener('wheel', (e) => { e.preventDefault(); e.stopPropagation(); scroller.scrollTop += e.deltaY; }, { passive: false });
 
-  /* ================= Follow scroll =================
-     With follow on, the canvas is locked to the reader: every pixel the document
-     scrolls, the cards move the same pixel, so a card stays still relative to the
-     passage beside it. Only the delta is applied, so a manual pan or zoom of the
-     canvas is kept. Re-renders that reset the reader's scroll (opening a document,
-     switching views) rebase instead of moving the canvas. */
-  let followTop = 0, followSaveT = null;
-  const touchCanvas = () => {};
-  function followRebase() { followTop = scroller.scrollTop; }
+  /* Scroll in screen pixels so every card keeps its offset from the source,
+     including beyond either edge. Manual canvas movement establishes a new offset. */
+  let followPosition = { documentId: null, top: 0 };
+  function resetFollowPosition() {
+    followPosition = { documentId: S.doc?.id, top: scroller.scrollTop };
+  }
+  const touchCanvas = resetFollowPosition;
   function followScroll() {
-    const top = scroller.scrollTop, d = top - followTop;
-    followTop = top;
-    if (!d || !prefs.follow || drag || app.classList.contains('no-canvas') || !S.doc) return;
-    S.view.y -= d;
-    applyView();
-    clearTimeout(followSaveT); followSaveT = setTimeout(savePrefs, 300);
+    const previous = followPosition;
+    resetFollowPosition();
+    if (!prefs.follow || drag || app.classList.contains('no-canvas') || !S.doc) return;
+    if (previous.documentId !== S.doc.id) return;
+    S.view.y -= scroller.scrollTop - previous.top;
+    applyView(); drawConnector(); savePrefs();
   }
 
   /* Pointer: drag node / pan surface / click-select */
@@ -1144,7 +1130,12 @@
     const len = pagesOf(n).length, i = meta(n).page;
     return len ? Math.min(len - 1, Math.max(0, Number.isInteger(i) ? i : len - 1)) : -1;
   }
-  const currentPage = (n) => pagesOf(n)[pageIndex(n)] || null;
+  function currentPage(n) {
+    // History comes from the server in created_at DESC, rowid DESC order.
+    // Stable sorting preserves that explicit record order for equal timestamps.
+    return [...(S.history[n.id] || [])].filter((e) => typeof e.answer === 'string' && e.answer.trim())
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0] || null;
+  }
   const marksOf = (n, expId) => (meta(n).marks || []).filter((m) => m.e === expId);
 
   /* Brief / full split. The backend appends a short overview after the full
@@ -1157,21 +1148,19 @@
   const AUTO_Q = /^(请解释这个知识点|请结合我圈出的疑点)/;
   const userAsked = (q) => !AUTO_Q.test(shownQuestion(q));
   function splitAnswer(exp, n) {
-    let text = String(exp.answer || '');
+    const text = String(exp.answer || '').trim();
     let brief = (exp.summary || '').trim();
-    const cm = text.match(/<!--\s*summary\s*:\s*([\s\S]*?)-->/i);
-    if (cm) { brief ||= cm[1].trim(); text = text.replace(cm[0], ''); }
-    const tm = text.match(SUMMARY_RE);
-    if (tm && tm.index > 0) { brief ||= tm[1].trim(); text = text.slice(0, tm.index); }
-    if (!userAsked(exp.question)) {
-      // Nobody typed a question: show the explanation itself, not the template scaffolding.
-      text = text.replace(/^\s*#{1,3}\s+(.+)\n/, (m, h) => (n && collapse(h) === collapse(n.title) ? '' : m))
-        .replace(/^[ \t]*(?:\*\*)?问题(?:\*\*)?[ \t]*[:：].*(?:\n|$)/m, '')
-        .replace(/^[ \t]*(?:\*\*)?(?:要点|结论)(?:\*\*)?[ \t]*[:：][ \t]*/gm, '');
-    }
-    text = text.trim();
     if (!brief) brief = plainMd(text).split(/(?<=[。！？.!?])\s*/)[0] || '';
     return { full: text, brief: clip(collapse(brief), 120) };
+  }
+
+  function diagnosticHtml(n, exp, run) {
+    const diagnostic = exp?.learning?.obstacle?.diagnostic;
+    if (!diagnostic || !Array.isArray(diagnostic.options)) return '';
+    return `<div class="obstacle-check"><p>${esc(diagnostic.question)}</p><div class="obstacle-choices">
+      ${diagnostic.options.map((o, i) => `<button class="btn btn--sm" data-diagnostic="${i}" ${run ? 'disabled' : ''}>${esc(o.label)}</button>`).join('')}
+      <button class="btn btn--sm" data-diagnostic="expand" ${run ? 'disabled' : ''}>${icon('arrow-r')}直接展开</button>
+      </div></div>`;
   }
 
   /* Answer HTML with the user's marks (bold / italic / highlight) and the words
@@ -1197,7 +1186,8 @@
     const src = srcLabel(n);
     const q = posOf(n);
     const attrs = `data-id="${esc(n.id)}" style="left:${q.x}px;top:${q.y}px"`;
-    const kindLine = `<span class="kind ${sel ? 'ink' : ''}">${KIND[n.kind] || n.kind} · ${depthLabel(n)}${m.status === 'mastered' ? ' · 已掌握' : ''}</span>`;
+    const branchLabel = { formula: '公式步骤', reasoning: '推理步骤', chart: '图表', question: '疑问', concept: '概念' }[m.branch_type];
+    const kindLine = `<span class="kind ${sel ? 'ink' : ''}">${branchLabel || KIND[n.kind] || n.kind} · ${depthLabel(n)}${m.status === 'mastered' ? ' · 已掌握' : ''}</span>`;
     if (!sel) {
       const sum = page ? splitAnswer(page, n).brief : (n.summary || n.content);
       const dots = pages.length ? `<span class="dots" title="${pages.length} 版解释">${pages.slice(-5).map(() => '<i class="on"></i>').join('')}</span>` : '';
@@ -1214,39 +1204,33 @@
         <button class="icon-btn" data-act="page-prev" ${pi <= 0 ? 'disabled' : ''} aria-label="上一版">${icon('chev-l')}</button>
         <span>${pi + 1} / ${pages.length}</span>
         <button class="icon-btn" data-act="page-next" ${pi >= pages.length - 1 ? 'disabled' : ''} aria-label="下一版">${icon('chev-r')}</button></span>` : '';
-    const optimize = canExplain && pages.length ? `<button class="btn btn--sm" data-act="node-optimize" ${deeper && !run ? '' : 'disabled'}
-        title="${deeper ? '汇总你圈画的词和更深层的解释，重新生成一版' : '先在解释里圈词追问，生成更深的解释后可用'}">${icon('wand')}优化解释</button>` : '';
     const kids = childrenOf(n.id).length;
-    const retell = S.kinds.has('retelling') && pages.length && kids ? `<button class="btn btn--sm" data-act="node-retell" ${run ? 'disabled' : ''}
+    const retell = S.kinds.has('retelling') && page && kids ? `<button class="btn btn--sm" data-act="node-retell" ${run ? 'disabled' : ''}
         title="把已解释的 ${kids} 个子节点串回这个父节点，生成一版回讲">${icon('narrate')}回讲</button>` : '';
     const pageBody = page
-      ? `<div class="xpl__body"><div class="answer" data-answer-node="${esc(n.id)}" data-exp="${esc(page.id)}">${answerHtml(n, page)}</div></div>
-         <div class="xpl__by">${pi > 0 ? '优化版 · ' : ''}${esc(page.provider)} / ${esc(page.model)} · ${new Date(page.created_at).toLocaleString('zh-CN', { hour12: false })}</div>`
+      ? `<div class="xpl__body"><div class="answer" data-answer-node="${esc(n.id)}" data-exp="${esc(page.id)}">${answerHtml(n, page)}</div></div>${diagnosticHtml(n, page, run)}`
       : `<div class="xpl__empty"><span>${canExplain ? '还没有解释。' : '当前镜像未启用解释工作流。'}</span>${canExplain ? `<button class="btn btn--sm btn--primary" data-act="node-explain" ${run ? 'disabled' : ''}>${icon('sparkle')}生成解释</button>` : ''}</div>`;
-    const waiting = S.pendingChat[n.id];
-    const bubbles = chat.map((h) => `<div class="bubble bubble--q">${esc(shownQuestion(h.question))}</div>
-        <div class="bubble bubble--a answer" data-answer-node="${esc(n.id)}" data-exp="${esc(h.id)}">${answerHtml(n, h)}</div>`).join('')
-      + (waiting ? `<div class="bubble bubble--q">${esc(waiting)}</div><div class="bubble bubble--a bubble--wait">正在思考…</div>` : '');
     return `<div class="gnode sel ${m.status === 'mastered' ? 'mastered' : ''}" ${attrs} role="group" aria-label="知识节点：${esc(n.title)}">
-      <div class="gnode__head">${kindLine}<span class="src" title="${esc(src)}">${esc(src)}</span>
+      <div class="gnode__head">
         <button class="icon-btn" data-act="node-reveal" title="定位原文" ${m.source?.fromNode ? 'disabled' : ''}>${icon('search')}</button>
         <button class="icon-btn" data-act="node-link" title="连接节点">${icon('arrow-r')}</button>
         <button class="icon-btn" data-act="node-delete" title="删除节点 (Delete)">${icon('trash')}</button>
         <button class="icon-btn" data-act="node-collapse" title="收起 (Esc)">${icon('close')}</button></div>
       <div class="gnode__scroll">
         <div class="gnode__body">
-          ${m.source?.quote ? `<div class="gnode__quote">“${esc(clip(collapse(m.source.quote), 200))}”</div>` : ''}
           <input class="title-input" data-title value="${esc(n.title)}" maxlength="160" aria-label="节点标题">
-          <details class="note-box" ${n.content && !m.source ? 'open' : ''}><summary>${icon('chev-r')}笔记 <span class="saved" data-saved></span></summary>
-            <textarea class="note-text" data-content rows="3" maxlength="20000" aria-label="节点内容" placeholder="记录你的理解…">${esc(n.content)}</textarea></details>
         </div>
         <div class="xpl">
-          <div class="xpl__head"><span class="label">解释</span>${pager}${optimize}${retell}</div>
-          ${run && !waiting ? runLine(run) : ''}
+          ${run ? runLine(run) : ''}
+          ${!run && ['failed', 'cancelled', 'interrupted'].includes(S.runs[n.id]?.state) ? '<p class="obstacle-error" role="alert">本次生成未完成，已保留上一份解释。可重新生成。</p>' : ''}
           ${pageBody}
+          ${page || m.source?.fromNode ? `<div class="node-learning-actions">
+            ${page && canExplain ? `<button class="icon-btn" data-act="node-explain" title="重新生成" aria-label="重新生成" ${run ? 'disabled' : ''}>${icon('sparkle')}</button>` : ''}
+            ${retell}${m.source?.fromNode ? '<button class="btn btn--sm" data-act="node-parent">↑ 返回上层</button>' : ''}
+          </div>` : ''}
         </div>
         ${canExplain ? `<div class="chat">
-          <div class="chat__log" aria-live="polite">${bubbles}</div>
+          <div class="explanation-depth" role="group" aria-label="解释深度">${[['auto', '自动'], ['black_box', '知道用途'], ['mechanism', '机制拆解']].map(([value, label]) => `<button type="button" data-depth="${value}" aria-pressed="${(m.explanation_depth || 'auto') === value}" ${run ? 'disabled' : ''}>${label}</button>`).join('')}</div>
           <form class="chat__form" data-chat><input class="input" name="q" maxlength="900" placeholder="继续问这个节点…" aria-label="向节点提问" autocomplete="off" ${run ? 'disabled' : ''}>
             <button class="btn btn--primary" type="submit" aria-label="发送" ${run ? 'disabled' : ''}>${icon('send')}</button></form>
         </div>` : ''}
@@ -1312,7 +1296,10 @@
     const hits = [...S.text.matchAll(new RegExp(words.map(escRe).join('\\s+'), 'g'))];
     if (!hits.length) return display;
     const want = collapse(draft.prefix).slice(-16);
-    const hit = hits.find((m) => collapse(S.text.slice(Math.max(0, m.index - 64), m.index)).endsWith(want)) || hits[0];
+    const candidates = hits.filter((m) => (!want || collapse(S.text.slice(Math.max(0, m.index - 64), m.index)).endsWith(want)) &&
+      (!draft.suffix || collapse(S.text.slice(m.index + m[0].length, m.index + m[0].length + 64)).startsWith(collapse(draft.suffix).slice(0, 16))));
+    if (candidates.length !== 1) throw new Error('选区在原文中无法唯一定位，请扩大选区或使用图像框选。');
+    const hit = candidates[0];
     const start = hit.index, end = start + hit[0].length;
     return { document_id: draft.document_id, revision_id: draft.revision_id, selector: draft.selector,
       quote: S.text.slice(start, end), prefix: S.text.slice(Math.max(0, start - 32), start),
@@ -1320,25 +1307,45 @@
   }
   /* Selection → server node. Reader selections hang under the section node that
      contains them; selections inside an explanation become follow-up children. */
+  function textAnchor(origin) {
+    const raw = S.text.slice(origin.sourceStart, origin.sourceEnd);
+    const pattern = collapse(origin.quote).split(' ').map(escRe).join('\\s+');
+    const hits = [...raw.matchAll(new RegExp(pattern, 'g'))];
+    const renderedHits = [...origin.blockText.matchAll(new RegExp(pattern, 'g'))];
+    const ordinal = [...origin.before.matchAll(new RegExp(pattern, 'g'))].length;
+    if (hits.length !== renderedHits.length || !hits[ordinal]) throw new Error('无法把这段排版文字准确对应到原文，请缩小选区或使用图像。');
+    const start = origin.sourceStart + hits[ordinal].index, end = start + hits[ordinal][0].length;
+    return { document_id: origin.documentId, revision_id: origin.revisionId,
+      selector: { type: 'text', start, end, unit: 'utf16' }, quote: S.text.slice(start, end),
+      prefix: S.text.slice(Math.max(0, start - 32), start), suffix: S.text.slice(end, end + 32) };
+  }
   async function createNodeFrom(origin) {
-    let parent, document_id, source;
-    if (origin.kind === 'pdf') {
+    let parent, document_id, source, visualSource;
+    if (origin.kind === 'visual') {
+      if (!api.runtime?.learning_features?.visual_selection) throw new Error('当前会话后端不支持图像，请保存工作后重新进入。');
+      parent = null; document_id = origin.documentId;
+      const form = new FormData(); form.append('file', origin.blob, 'selection.png'); form.append('revision_id', origin.revisionId);
+      const { visual } = await api.post(`/api/documents/${p(document_id)}/visuals`, form);
+      source = { quote: origin.quote };
+      visualSource = { artifact_id: visual.id, document_id, revision_id: visual.revision_id, selector: origin.selector || { type: 'whole-image' } };
+    } else if (origin.kind === 'pdf') {
       parent = null; document_id = S.doc.id; source = pdfAnchor(origin.ref);
     } else if (origin.kind === 'node') {
       parent = nodeOf(origin.nodeId);
       document_id = parent.document_id;
-      source = { quote: origin.quote, fromNode: parent.id, ...(origin.expId ? { fromExp: origin.expId } : {}) };
+      source = { quote: origin.quote, prefix: origin.prefix || '', suffix: origin.suffix || '', fromNode: parent.id, ...(origin.expId ? { fromExp: origin.expId } : {}) };
     } else {
       parent = sectionNodeOf(origin.block) || null;
       document_id = S.doc.id;
-      source = { quote: origin.quote, block: origin.block, label: origin.label };
+      source = textAnchor(origin);
     }
     const node = await sync(api.post(`${projectPath()}/nodes`, {
       document_id, title: guessTitle(origin.quote), kind: 'concept',
       content: origin.quote.slice(0, 20000), parent_id: parent?.id || null,
-      metadata: { source, status: 'learning', position: placeNew(parent), pages: [] },
+      metadata: { source, branch_type: origin.branchType || 'auto', ...(visualSource ? { visual_source: visualSource } : {}), status: 'learning', position: placeNew(parent), pages: [] },
     }));
     S.nodes.push(node);
+    if (visualSource?.selector?.type === 'whole-image') renderVisualOriginal().catch(fail);
     selectNode(node.id); ensureVisible(node); refreshMarks(); renderTree();
     if (parent) renderNode(parent.id);
     return node;
@@ -1403,6 +1410,17 @@
     const nEl = e.target.closest('.gnode'), n = nEl && nodeOf(nEl.dataset.id);
     if (!n) return;
     const act = e.target.closest('[data-act]')?.dataset.act;
+    const depth = e.target.closest('[data-depth]')?.dataset.depth;
+    if (depth && !running(n.id)) { await patchMeta(n, { explanation_depth: depth }); renderNode(n.id); return; }
+    const choice = e.target.closest('[data-diagnostic]')?.dataset.diagnostic;
+    if (choice !== undefined) {
+      const exp = currentPage(n), diagnostic = exp?.learning?.obstacle?.diagnostic;
+      if (!diagnostic || running(n.id)) return;
+      const question = choice === 'expand' ? '请直接展开完整解释，补全必要步骤和适用条件，不再提诊断问题。' : diagnostic.options[Number(choice)]?.question;
+      if (question) await explain(n, question, { responseMode: 'expand' });
+      return;
+    }
+    if (act === 'node-parent') { selectNode(meta(n).source?.fromNode, { center: true }); return; }
     if (act === 'node-delete') await deleteNode(n.id);
     if (act === 'node-collapse') selectNode(null);
     if (act === 'node-cancel' && running(n.id)) { await api.cancel(S.runs[n.id].id); toast('已请求取消'); }
@@ -1442,7 +1460,10 @@
     if (!sel.rangeCount || sel.isCollapsed) return null;
     const host = (sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement)?.closest('.gnode.sel .answer');
     if (!host || !host.contains(sel.focusNode)) return null;
-    return { quote: sel.toString().trim(), nodeId: host.dataset.answerNode, expId: host.dataset.exp, rect: sel.getRangeAt(0).getBoundingClientRect() };
+    const range = sel.getRangeAt(0), before = range.cloneRange(), after = range.cloneRange();
+    before.selectNodeContents(host); before.setEnd(range.startContainer, range.startOffset);
+    after.selectNodeContents(host); after.setStart(range.endContainer, range.endOffset);
+    return { quote: sel.toString().trim(), prefix: before.toString().slice(-64), suffix: after.toString().slice(0, 64), nodeId: host.dataset.answerNode, expId: host.dataset.exp, rect: range.getBoundingClientRect() };
   }
   function showSelBar(s, at) {
     if (!s || s.quote.length < 1) return;
@@ -1468,7 +1489,7 @@
     selBar.addEventListener('click', action(async (ev) => {
       const k = ev.target.closest('[data-k]')?.dataset.k;
       if (!k) return;
-      const origin = { kind: 'node', nodeId: s.nodeId, expId: s.expId, quote: s.quote.slice(0, 500) };
+      const origin = { kind: 'node', nodeId: s.nodeId, expId: s.expId, quote: s.quote.slice(0, 6000), prefix: s.prefix, suffix: s.suffix };
       hideSelBar();
       if (k === 'extract') { const c = await createNodeFrom(origin); toast(`已提取「${clip(c.title, 16)}」`); }
       if (k === 'ask') openAsk(origin, s.rect);
@@ -1550,11 +1571,13 @@
     }
   }
   /* page=true → a new explanation version (pager); page=false → a chat turn. */
-  async function explain(node, question, { page = true } = {}) {
+  async function explain(node, question, { page = true, responseMode = 'auto' } = {}) {
     if (!S.kinds.has('explanation')) throw new Error('当前镜像未启用解释工作流');
     if (running(node.id)) throw new Error('这个节点正在生成，请稍候');
     const q = withStyle(question);
-    const input = { node_id: node.id, ...(q ? { question: q } : {}) };
+    const supportsMode = (api.runtime?.plugins || []).some((plugin) => (plugin.workflows || [])
+      .some((workflow) => workflow.kind === 'explanation' && workflow.input_schema?.properties?.response_mode));
+    const input = { node_id: node.id, ...(supportsMode ? { response_mode: responseMode } : {}), ...(q ? { question: q } : {}) };
     if (!page) { S.pendingChat[node.id] = question; renderNode(node.id); }
     let runId = null;
     try {
@@ -1564,8 +1587,7 @@
       } });
       delete S.pendingChat[node.id];
       await addExplanation(node, result.explanation, page);
-      const total = pagesOf(node).length;
-      toast(page ? (total > 1 ? `已生成第 ${total} 版解释` : '已生成解释') : '已回答');
+      toast('已更新解释');
     } finally {
       delete S.pendingChat[node.id];
       if (runId) markPageRun(runId, false);
@@ -1633,7 +1655,7 @@
         return;
       }
       await addExplanation(n, result.explanation, true);
-      toast(result.status === 'partial' ? `已生成部分回讲（${(result.blocked_child_ids || []).length} 个子节点尚未解释）` : '已生成回讲');
+      toast(result.status === 'partial' ? `已生成部分回讲（${new Set([...(result.blocked_child_ids || []), ...(result.unresolved_descendant_ids || [])]).size} 个分支节点尚未解释）` : '已生成回讲');
     } finally {
       if (runId) markPageRun(runId, false);
       paintState();
@@ -1658,6 +1680,10 @@
 
   /* ================= Inspector ================= */
   const inspector = $('#inspector');
+  function placeInspector() {
+    const target = innerWidth <= 700 ? $('#canvas') : surface;
+    if (inspector.parentElement !== target) target.appendChild(inspector);
+  }
   function renderInspector() {
     const n = nodeOf(S.selected);
     const pool = docNodes(), total = pool.length, mastered = pool.filter((x) => meta(x).status === 'mastered').length;
@@ -2240,11 +2266,15 @@
     const items = (await sync(api.get(`${projectPath()}/explanations`))).items || [];
     S.history = {};
     items.forEach((h) => (S.history[h.node_id] ||= []).push(h));
-    Object.values(S.history).forEach((l) => l.sort((a, b) => (a.created_at < b.created_at ? 1 : -1)));
+    Object.values(S.history).forEach((l) => l.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
   }
   async function openProject(id) {
     ++revision;
     S.project = S.projects.find((x) => x.id === id) || S.projects[0];
+    if (api.managed && api.lease?.workspace_id) {
+      const { workspace } = await sync(api.get(`/control/workspaces/${p(api.lease.workspace_id)}`, { auth: false }));
+      S.project = { ...S.project, title: workspace.title };
+    }
     const prefs = readJSON(prefKey(), {});
     highlights = readJSON(hlKey(), []);
     S.doc = null; S.text = ''; S.selected = prefs.node || null; S.history = {};
@@ -2277,6 +2307,15 @@
     localStorage.setItem('tlm.last-project', id);
     await openProject(id);
     toast('已切换到「' + S.project.title + '」');
+  }
+
+  async function openWorkspace(workspaceId) {
+    if (Object.keys(S.runs).some(running)) { toast('有任务正在生成，请等待完成后再切换'); return; }
+    const policy = await api.accessPolicy();
+    const code = await promptModal('打开工作区', policy.invitation_only ? '系统邀请码（必填）' : '系统邀请码（可选）', '', 128, !policy.invitation_only);
+    if (code === null) return;
+    await api.enter(code, { workspaceId });
+    location.reload();
   }
 
   /* ================= Menus ================= */
@@ -2314,7 +2353,15 @@
     e.preventDefault();
     items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
   });
-  function paintWsMenu() {
+  async function paintWsMenu() {
+    if (api.managed) {
+      try {
+        const { items } = await api.listWorkspaces();
+        $('#ws-menu').innerHTML = items.map((x) => `<button class="menu__item" role="menuitemradio" aria-checked="${x.workspace_id === api.lease?.workspace_id}" data-workspace="${esc(x.workspace_id)}">${esc(x.title)}</button>`).join('') +
+          '<hr><button class="menu__item" data-act="ws-new">新建工作区…</button><button class="menu__item" data-act="ws-rename">重命名当前工作区</button><button class="menu__item" data-act="ws-delete">清空当前工作区</button>';
+      } catch (error) { toast(describe(error)); }
+      return;
+    }
     const items = S.projects.map((x) => `<button class="menu__item" role="menuitemradio" aria-checked="${x.id === S.project?.id}" data-project="${esc(x.id)}"><span>${esc(x.title)}</span></button>`).join('');
     $('#ws-menu').innerHTML = `<div class="menu__section" style="padding:8px 12px"><span class="label">工作区</span></div>${items}<hr>
       <button class="menu__item" role="menuitem" data-act="ws-new" title="由控制面管理">新建工作区…</button>
@@ -2322,6 +2369,8 @@
       <button class="menu__item" role="menuitem" data-act="ws-delete">清空当前工作区</button>`;
   }
   $('#ws-menu').addEventListener('click', action(async (e) => {
+    const workspace = e.target.closest('[data-workspace]');
+    if (workspace) { closeMenus(); if (workspace.dataset.workspace !== api.lease?.workspace_id) await openWorkspace(workspace.dataset.workspace); return; }
     const item = e.target.closest('[data-project]');
     if (item) { closeMenus(); if (item.dataset.project !== S.project.id) await switchProject(item.dataset.project); }
   }));
@@ -2338,7 +2387,7 @@
   }
   function paintOutline() {
     if (isPdfView()) { paintPdfOutline().catch(fail); return; }
-    const hs = $$('h2[data-b], h3[data-b]', sheet);
+    const hs = $$('h1[data-b], h2[data-b], h3[data-b], h4[data-b], h5[data-b], h6[data-b]', sheet);
     $('#outline-menu').innerHTML = hs.length
       ? `<div class="menu__section" style="padding:8px 12px"><span class="label">大纲</span></div>` + hs.map((h) =>
         `<button class="menu__item ${h.tagName === 'H3' ? 'lvl3' : ''}" role="menuitem" data-goto="${h.dataset.b}">${esc(clip(collapse(h.textContent), 40))}</button>`).join('')
@@ -2369,36 +2418,27 @@
         const body = $('#share-body', root);
         if (!body) return;
         try {
-          const res = await api.post(`${projectPath()}/share`, {});
+          const res = await api.createShare();
           const code = res?.code || res?.share_code || '';
           if (!code) throw new Error('服务器未返回分享码');
-          const link = `${location.origin}/workspace.html?share=${encodeURIComponent(code)}`;
-          const expires = res?.expires_at ? new Date(res.expires_at) : null;
-          const qr = qrSvg(link);
+          const expires = res.invitation?.expires_at ? new Date(res.invitation.expires_at * 1000) : null;
           body.innerHTML = `
-            ${qr ? `<div style="display:grid;justify-items:center;margin-bottom:16px">
-              <div id="share-qr" style="background:#fff;border:1px solid var(--line);padding:8px">${qr}</div>
-            </div>` : ''}
             <label class="field"><span class="label">分享码</span>
               <div style="display:flex;gap:8px">
                 <input class="input mono" id="share-code" readonly value="${esc(code)}">
                 <button class="btn btn--primary" id="share-copy" type="button">${icon('copy')}复制</button>
               </div>
             </label>
-            <label class="field" style="margin-top:16px"><span class="label">分享链接</span>
-              <div style="display:flex;gap:8px">
-                <input class="input mono" id="share-link" readonly value="${esc(link)}">
-                <button class="btn" id="share-copy-link" type="button">复制链接</button>
-              </div>
-            </label>
+            <button class="btn" id="share-revoke" type="button" style="margin-top:16px">撤销分享码</button>
             ${expires && !isNaN(expires) ? `<p class="muted small" style="margin-top:12px">有效期至 ${esc(expires.toLocaleString())}</p>` : ''}`;
-          $('#share-copy', root).onclick = async () => { await copyText(code); toast('已复制分享码'); };
-          $('#share-link', root)?.addEventListener('focus', (e) => e.target.select());
-          $('#share-copy-link', root).onclick = async () => { await copyText(link); toast('已复制分享链接'); };
+          $('#share-code', root).addEventListener('focus', (e) => e.target.select());
+          $('#share-copy', root).onclick = action(async () => { await copyText(code); toast('已复制分享码'); });
+          $('#share-revoke', root).onclick = action(async () => {
+            await api.revokeShare(res.invitation.invitation_id);
+            body.innerHTML = '<p>分享码已撤销</p>';
+          });
         } catch (e) {
-          body.innerHTML = e.code === 'share_not_supported'
-            ? '<p class="muted small">分享由控制面提供（工作区邀请），这个实例本身不生成分享码。通过控制面入口进入时可在那里邀请他人。</p>'
-            : `<p class="error">无法生成分享码：${esc(describe(e))}</p>`;
+          body.innerHTML = `<p class="error">无法生成分享码：${esc(describe(e))}</p>`;
         }
       },
     });
@@ -2443,10 +2483,12 @@
     setTimeout(() => { drawEdges(); drawConnector(); updateStatus(); }, 0);
   }
   function setTool(t) {
+    if (t === 'visual' && (!isPdfView() || !api.runtime?.learning_features?.visual_selection)) { toast('请打开 PDF；旧会话需保存工作后重新进入以启用图像框选。'); return; }
     S.tool = t;
     $$('[data-tool]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tool === t)));
     $('#reader').classList.toggle('tool-highlight', t === 'highlight');
     $('#reader').classList.toggle('tool-draw', t === 'draw');
+    $('#reader').classList.toggle('tool-visual', t === 'visual');
     $('#drawbar').hidden = t !== 'draw';
     if (t === 'draw') { hideAsk(); hideSelBar(); getSelection().removeAllRanges(); paintDrawbar(); paintInk(); }
     if (t === 'highlight') toast('高亮模式：选中文字即高亮（仅保存在本浏览器），点击已有高亮可移除');
@@ -2456,8 +2498,8 @@
   async function endTrial() {
     const local = api.runtime?.mode === 'local' && !api.managed;
     const ok = await confirmModal(local ? '断开本地会话' : '结束试用',
-      local ? '本地模式没有临时会话，数据会保留在本机，返回首页即可。' : '结束后工作区与其中的所有文档、节点会被删除，且无法恢复。需要的话请先导出。',
-      local ? '返回首页' : '结束并删除');
+      local ? '数据会保留在本机，返回首页即可。' : api.lease?.workspace_id ? '结束后释放计算，项目数据保留；项目超过 4 小时不使用后清理。' : '临时工作区数据会被删除，请先导出。',
+      local ? '返回首页' : '结束试用');
     if (!ok) return;
     if (!local) await sync(api.release());
     location.href = 'index.html';
@@ -2468,7 +2510,18 @@
     modal({ title: '键盘快捷键', body: `<table class="kbd-table">${rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('')}</table>`,
       actions: [{ label: '知道了', primary: true, run: (c) => c() }] });
   }
+  async function showIdentity() {
+    closeMenus();
+    if (!api.managed) { toast('独立实例没有控制面用户身份'); return; }
+    const { user } = await api.get('/control/users/me', { auth: false });
+    const saved = api.recovery;
+    const recovery = saved?.user?.user_id === user.user_id ? saved.recovery_token : '';
+    modal({ title: '用户与恢复凭据', body: `<label class="field"><span class="label">用户 UUID</span><input class="input mono" readonly value="${esc(user.user_id)}"></label>
+      ${recovery ? `<label class="field"><span class="label">恢复凭据</span><input class="input mono" readonly value="${esc(recovery)}"></label>` : '<p>恢复凭据仅在创建用户时显示，请使用已保存的凭据恢复登录。</p>'}`,
+      actions: [{ label: '关闭', run: c => c() }], onOpen: root => $$('input', root).forEach(input => input.addEventListener('focus', () => input.select())) });
+  }
   const ACTIONS = {
+    'identity': showIdentity,
     'import': () => $('#file-input').click(),
     'new-file': newDocument,
     'new-folder': () => newFolder(),
@@ -2486,11 +2539,13 @@
     'toggle-follow': () => { setPref('follow', !prefs.follow); toast(prefs.follow ? '知识图将跟随阅读区滚动' : '已关闭跟随滚动'); },
     'end-trial': () => { closeMenus(); return endTrial(); },
     'shortcuts': () => { closeMenus(); showShortcuts(); },
-    'ws-new': () => {
+    'ws-new': async () => {
       closeMenus();
-      // POST /api/projects only echoes the current project: creating, choosing and
-      // sharing workspaces is the control plane's job (/control/workspaces*).
-      toast('每个实例只服务一个工作区；新建、切换工作区由控制面提供', { ms: 5000 });
+      if (!api.managed) { toast('独立实例只服务一个工作区'); return; }
+      const title = await promptModal('新建工作区', '名称');
+      if (!title) return;
+      const { workspace } = await api.createWorkspace(title);
+      await openWorkspace(workspace.workspace_id);
     },
     'ws-rename': async () => {
       closeMenus();
@@ -2518,10 +2573,57 @@
   }));
   $$('.seg [data-view]').forEach((b) => b.addEventListener('click', () => { if (!b.disabled) setView(b.dataset.view); }));
   $$('[data-tool]').forEach((b) => b.addEventListener('click', () => setTool(b.dataset.tool)));
+  let visualDrag = null;
+  scroller.addEventListener('pointerdown', (event) => {
+    if (S.tool !== 'visual' || !pdfv || event.button !== 0) return;
+    const page = event.target.closest('.pdfv-page');
+    if (!page) return;
+    event.preventDefault(); hideAsk(); getSelection().removeAllRanges();
+    const box = document.createElement('div'); box.className = 'visual-selection'; page.appendChild(box);
+    visualDrag = { page, box, x: event.clientX, y: event.clientY, documentId: S.doc.id, revisionId: S.doc.current_revision_id };
+    scroller.setPointerCapture(event.pointerId);
+  });
+  scroller.addEventListener('pointermove', (event) => {
+    if (!visualDrag) return;
+    const { page, box, x, y } = visualDrag, r = page.getBoundingClientRect();
+    const x2 = Math.max(r.left, Math.min(r.right, event.clientX)), y2 = Math.max(r.top, Math.min(r.bottom, event.clientY));
+    Object.assign(box.style, { left: Math.min(x, x2) - r.left + 'px', top: Math.min(y, y2) - r.top + 'px', width: Math.abs(x2 - x) + 'px', height: Math.abs(y2 - y) + 'px' });
+  });
+  scroller.addEventListener('pointercancel', () => { visualDrag?.box.remove(); visualDrag = null; });
+  scroller.addEventListener('pointerup', action(async () => {
+    if (!visualDrag) return;
+    const drag = visualDrag; visualDrag = null;
+    const rect = drag.box.getBoundingClientRect(); drag.box.remove();
+    if (rect.width < 8 || rect.height < 8) return;
+    const cropped = await pdfv.view.crop(Number(drag.page.dataset.page), rect);
+    setTool('select');
+    openAsk({ kind: 'visual', ...cropped, documentId: drag.documentId, revisionId: drag.revisionId,
+      quote: `第 ${drag.page.dataset.page} 页图像选区`, label: `第 ${drag.page.dataset.page} 页` }, rect);
+  }));
+  $('#visual-file-button').addEventListener('click', () => $('#visual-file').click());
+  $('#visual-file').addEventListener('change', action(async (event) => {
+    const file = event.target.files[0]; event.target.value = '';
+    if (!file) return;
+    if (!api.runtime?.learning_features?.visual_selection) throw new Error('当前会话不支持图像，请保存后重新进入。');
+    if (file.size > 8 * 1024 * 1024) throw new Error('请选择小于 8 MiB 的图片。');
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 2400 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas'); canvas.width = Math.round(bitmap.width * scale); canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height); bitmap.close();
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    if (!blob || blob.size > 4 * 1024 * 1024) throw new Error('图像过大，请裁剪后重试。');
+    const { document: doc } = await api.post(`${projectPath()}/documents`, { title: file.name, text: '# ' + file.name, derive_nodes: false });
+    S.docs.push(doc); await openDocument(doc.id);
+    openAsk({ kind: 'visual', blob, documentId: doc.id, revisionId: doc.current_revision_id, quote: '图像：' + file.name, label: file.name }, { left: 24, top: 80, bottom: 100 });
+  }));
   $('#focus-btn').addEventListener('click', () => setFocusMode(!app.classList.contains('focus')));
   $('#find-btn').addEventListener('click', () => openPalette());
   scroller.addEventListener('scroll', () => { updateStatus(); drawConnector(); followScroll(); }, { passive: true });
-  window.addEventListener('resize', () => { drawConnector(); updateStatus(); if (!isPdfView()) paintInk(); });
+  window.addEventListener('resize', () => {
+    placeInspector();
+    if (innerWidth <= 700 && nodeOf(S.selected)) ensureVisible(nodeOf(S.selected));
+    drawConnector(); updateStatus(); if (!isPdfView()) paintInk();
+  });
   $('#prefs-btn')?.addEventListener('click', () => openPrefs());
   // Right-click on a reader selection opens the same ask menu.
   sheet.addEventListener('contextmenu', (e) => {
@@ -2592,12 +2694,13 @@
     if (s <= 0) {
       clearInterval(ttlTimer); S.connected = false; paintState();
       modal({ title: '试用已结束', locked: true,
-        body: '<p style="margin:0">试用时间已到，工作区与其中的数据会被回收。感谢体验 TutorLM。</p>',
+        body: `<p style="margin:0">${api.lease?.workspace_id ? '计算租约已到期，项目数据暂时保留；超过 4 小时不使用后清理。' : '试用时间已到，临时工作区会被回收。'}</p>`,
         actions: [{ label: '返回首页', primary: true, run: () => { location.href = 'index.html'; } }] });
     }
   }
   /* Session lost (401/410) or never established: offer invite entry in place. */
   function reconnect(err) {
+    if (api.managed) { location.href = 'index.html'; return; }
     const needsInvite = api.runtime?.mode === 'demo' || api.managed || err?.code === 'invite_required';
     const lost = err && [401, 410].includes(err.status) && err.code !== 'invite_required';
     modal({
@@ -2725,6 +2828,12 @@
   applyDocScale();
 
   /* ================= Boot ================= */
+  let presence = null, sessionCheck = null, lastTouch = 0;
+  document.addEventListener('pointerdown', () => {
+    if (!S.connected || !api.lease?.workspace_id || Date.now() - lastTouch < 60000) return;
+    lastTouch = Date.now();
+    api.post(`/control/workspaces/${p(api.lease.workspace_id)}/touch`, {}, { auth: false }).catch(fail);
+  }, { passive: true });
   async function start() {
     applyPrefs();
     const health = await api.get('/health/ready', { auth: false }).catch(() => ({}));
@@ -2738,29 +2847,32 @@
     const workflows = (api.runtime.plugins || []).filter((x) => x.enabled !== false).flatMap((x) => x.workflows || []);
     S.kinds = new Set(workflows.map((w) => w.kind));
     S.connected = true; paintState();
+    if (api.managed && api.lease) {
+      presence?.dispose();
+      const { attachLeaseLifecycle } = await import('/static/reader/lease-lifecycle.js');
+      presence = attachLeaseLifecycle(api.lease, { onLeaseLost: fail });
+      await presence.ready;
+    }
     clearInterval(ttlTimer); tickTtl(); ttlTimer = setInterval(tickTtl, 1000);
     // Redeem a share link once: the server copies the shared workspace into a
     // new project owned by this session; loadProjects() then opens it.
-    if (pendingShareCode) {
-      const code = pendingShareCode; pendingShareCode = '';
-      try {
-        $('#st-state').textContent = '正在复制副本…';
-        await api.redeemShare(code);
-      } catch (e) {
-        toast(e.status === 404 ? '分享码无效或已过期' : e.code === 'share_redeem_not_supported' ? '分享码由控制面兑换，这个实例无法直接打开' : (e.status === 401 || e.status === 403 ? '分享码需要先登录' : (e.message || '分享码兑换失败')), { ms: 6000 });
-      }
-    }
     await loadProjects();
     await resumeRuns();
-    if (api.session) setInterval(() => api.loadSession().catch((e) => { if ([401, 410].includes(e.status)) fail(e); }), 60000);
+    if (api.managed && api.recovery && !sessionStorage.getItem('tlm.recovery-shown')) {
+      sessionStorage.setItem('tlm.recovery-shown', '1');
+      toast('已创建持久用户，请在用户菜单中查看并保存恢复凭据', { ms: 8000 });
+    }
+    clearInterval(sessionCheck);
+    if (api.session) sessionCheck = setInterval(() => api.loadSession().catch((e) => { if ([401, 410].includes(e.status)) fail(e); }), 60000);
   }
   async function boot() {
+    placeInspector();
     applyPrefs();
     renderReader(); renderCanvas(); paintState();
     // A share link (?share=CODE) is redeemed once, then removed from the URL so
     // a reload never copies the workspace twice.
     pendingShareCode = new URLSearchParams(location.search).get('share');
-    if (pendingShareCode) history.replaceState(null, '', location.pathname);
+    if (pendingShareCode) { location.replace('index.html?share=' + encodeURIComponent(pendingShareCode)); return; }
     try {
       await api.connect();
     } catch (e) {

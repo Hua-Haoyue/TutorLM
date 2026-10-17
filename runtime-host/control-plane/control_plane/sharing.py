@@ -129,7 +129,7 @@ class ShareService:
     # ------------------------------------------------------------ 权限
     @property
     def workspace_idle_seconds(self) -> int:
-        return int(self._config.workspace_idle_ttl_seconds)
+        return None if self._config.workspace_permanent or self._config.workspace_idle_ttl_seconds is None else int(self._config.workspace_idle_ttl_seconds)
 
     def require_shareable_workspace(self, workspace_id: str, user_id: str) -> Workspace:
         """只有项目所有者能为自己的项目操作分享码。"""
@@ -338,10 +338,6 @@ class ShareService:
                 'UPDATE workspaces SET state=?,storage_initialized=1 WHERE workspace_id=?',
                 ('active', destination.workspace_id),
             )
-        self._store.grant_trial(
-            destination.workspace_id, destination.user_id,
-            source='share_import', invitation_id=invitation_id,
-        )
         self._store.unpin_workspace_copy(copy.copy_id, str(CopyState.COPIED))
         self._store.record_event(
             'workspace.copy_finished',

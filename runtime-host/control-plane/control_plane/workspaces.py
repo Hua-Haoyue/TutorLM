@@ -8,6 +8,7 @@ from control_plane.errors import InvalidToken, RuntimeUnavailable, WorkspaceExpi
 from control_plane.ports import RuntimeAdapter
 from control_plane.security import generate_token, hash_token, verify_token
 from control_plane.store import ControlPlaneStore
+from control_plane.domain.models import canonical_data_directory
 
 
 class WorkspaceService:
@@ -39,6 +40,7 @@ class WorkspaceService:
         workspace_id = str(uuid.uuid4())
         return self.store.create_workspace(
             workspace_id, user_id, title, self.config.workspace_volume_name(workspace_id),
+            data_directory=canonical_data_directory(user_id, workspace_id),
         )
 
     def get(self, workspace_id: str, user_id: str, *, touch: bool = False):
@@ -61,6 +63,8 @@ class WorkspaceService:
         # rollback could not delete its volume, it is claimed here and handed to
         # the normal storage GC below (retry), never reopened or published.
         report['failed_copies_claimed'] = self.store.claim_failed_copy_destinations()
+        if self.config.workspace_permanent or self.config.workspace_idle_ttl_seconds is None:
+            return report
         for workspace in self.store.claim_expired_workspaces(self.config.workspace_idle_ttl_seconds):
             try:
                 expected = self.config.workspace_volume_name(workspace.workspace_id)

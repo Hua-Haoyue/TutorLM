@@ -49,3 +49,13 @@ def test_host_builds_native_provider(env):
     provider = build_host_provider(config.provider)
     assert provider.capabilities.name == 'gemini'
     assert provider.capabilities.model == 'gemini-3.1-pro'
+
+
+def test_structured_explanation_uses_native_json_mode():
+    def transport(request, timeout):
+        assert json.loads(request.data)['generationConfig']['responseMimeType'] == 'application/json'
+        return 200, json.dumps({'candidates': [{'finishReason': 'STOP', 'content': {'parts': [
+            {'text': '{"kind":"formula","answer":"x ≠ 0","diagnostic":null}'}]}}]}).encode()
+    provider = GeminiProvider(api_base='https://example.test', api_key='test-key', model='gemini', transport=transport)
+    result = provider.generate(GenerateRequest(kind='explanation', prompt='Explain as JSON', json_object=True))
+    assert json.loads(result.text)['answer'] == 'x ≠ 0'

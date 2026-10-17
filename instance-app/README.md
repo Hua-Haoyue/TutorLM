@@ -1,6 +1,8 @@
 # Instance Application
 
-本目录属于容器内团队。`backend/` 已提供**可本地启动的 HTTP Host**（`python -m backend`，见 `backend/README.md`）；`frontend/` 提供租约页面生命周期、邀请码入口与阅读器模块。**完整学习工作台仍未提供**。
+本目录属于容器内团队。`backend/` 提供可启动的 HTTP Host；`frontend/` 提供通用 Reader 和租约模块；
+`workbench/` 提供完整工作台页面。受控 session、邀请码准入与项目分享遵守
+[`../contracts/instance-runtime-v4.md`](../contracts/instance-runtime-v4.md)，已通过本地隔离 Docker 联调。
 
 预留归属：
 

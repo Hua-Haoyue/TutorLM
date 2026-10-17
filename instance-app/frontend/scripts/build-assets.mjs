@@ -10,6 +10,7 @@ if (!existsSync(path.join(pdfjs, 'build/pdf.min.mjs'))) {
 }
 mkdirSync(target, { recursive: true });
 cpSync(path.join(root, 'assets'), path.join(target, 'assets'), { recursive: true });
+cpSync(path.join(root, 'assets'), path.join(target, 'static/reader'), { recursive: true });
 const engineTarget = path.join(target, 'static/pdfjs');
 mkdirSync(engineTarget, { recursive: true });
 cpSync(path.join(pdfjs, 'build'), engineTarget, { recursive: true });

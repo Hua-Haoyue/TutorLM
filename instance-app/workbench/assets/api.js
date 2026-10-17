@@ -8,6 +8,9 @@
   const TOKEN = 'tlm.app-token';
   const BINDING = 'tlm.lease-binding';
   const PENDING = 'tlm.pending-project';
+  const WORKSPACE = 'tlm.workspace';
+  const RECOVERY = 'tlm.recovery';
+  const IMPORT = 'tlm.share-import';
   let runtime, session, limits, lease, managed = null;
 
   class ApiError extends Error {
@@ -83,8 +86,11 @@
     return bindLease(await get('/control/leases/current', { auth: false }));
   }
   /* POST /control/leases (idempotent with a valid cookie). 503 carries Retry-After. */
-  async function requestLease() {
-    const value = await post('/control/leases', {}, { auth: false });
+  async function requestLease(invitationCode = '', workspaceId = '') {
+    const value = await post('/control/leases', {
+      ...(workspaceId ? { workspace_id: workspaceId } : {}),
+      ...(invitationCode.trim() ? { invitation_code: invitationCode.trim() } : {}),
+    }, { auth: false });
     // The lease token in the body is never stored: the HttpOnly cookie is the credential.
     return value?.lease ? bindLease(value) : currentLease();
   }
@@ -123,18 +129,48 @@
       }
     }
     if (!session) {
-      if (!inviteCode && runtime.mode === 'demo') throw new ApiError(401, { error: { message: '请输入应用体验码', code: 'invite_required' } });
-      const issued = await post('/api/sessions', inviteCode ? { invite_code: inviteCode } : {}, { auth: false });
+      if (!managed && !inviteCode && runtime.mode === 'demo') throw new ApiError(401, { error: { message: '请输入应用体验码', code: 'invite_required' } });
+      const issued = managed
+        ? await post('/control/app-session', {}, { auth: false })
+        : await post('/api/sessions', inviteCode ? { invite_code: inviteCode } : {}, { auth: false });
       sessionStorage.setItem(TOKEN, issued.access_token);
       await loadSession();
     }
     return runtime;
   }
   /* Full entry: lease (managed only) → wait for instance → runtime + app session. */
-  async function enter(inviteCode, { onStep = () => {}, signal } = {}) {
+  async function enter(inviteCode = '', { onStep = () => {}, signal, shareCode = '', workspaceId = '' } = {}) {
+    const checkpoint = () => { if (signal?.aborted) throw new DOMException('aborted', 'AbortError'); };
+    checkpoint();
     if (await detect()) {
+      const policy = await accessPolicy();
+      if (policy.invitation_only && !inviteCode.trim()) {
+        throw new ApiError(401, { error: { code: 'invitation_required', message: '请输入系统邀请码' } });
+      }
+      await ensureUser();
+      let target = workspaceId;
+      if (shareCode.trim()) target = (await redeemShare(shareCode.trim())).workspace.workspace_id;
+      if (!target) target = sessionStorage.getItem(WORKSPACE);
+      if (target) {
+        try { await get(`/control/workspaces/${part(target)}`, { auth: false }); }
+        catch (error) {
+          if (![404, 410].includes(error.status)) throw error;
+          sessionStorage.removeItem(WORKSPACE); target = '';
+        }
+      }
+      if (!target) {
+        const items = (await listWorkspaces()).items;
+        target = items[0]?.workspace_id || (await createWorkspace('我的工作区')).workspace.workspace_id;
+      }
+      sessionStorage.setItem(WORKSPACE, target);
+      checkpoint();
+      let previous;
+      try { previous = (await currentLease()).lease; }
+      catch (error) { if (![401, 404, 410].includes(error.status)) throw error; }
+      if (previous && previous.workspace_id !== target) await release();
       onStep('alloc');
-      await requestLease();
+      await requestLease(inviteCode, target);
+      if (signal?.aborted) { await release(); checkpoint(); }
       onStep('start');
       await waitLeaseActive({ signal, onState: (s) => onStep('start', s) });
     }
@@ -145,15 +181,62 @@
      project owned by the caller and returns its id. We remember that id so the
      workspace opens it once instead of the visitor's own empty workspace. */
   async function redeemShare(code) {
-    const value = await post(`/api/shares/${part(code)}/redeem`, {}, { auth: !!sessionStorage.getItem(TOKEN) });
-    const projectId = value?.project_id || value?.project?.id || value?.id || '';
-    if (projectId) sessionStorage.setItem(PENDING, projectId);
+    if (!(await detect())) throw new ApiError(409, { message: '独立实例不支持项目分享，请使用控制面入口' });
+    await ensureUser();
+    let pending;
+    try { pending = JSON.parse(sessionStorage.getItem(IMPORT)); } catch { /* fresh import */ }
+    if (pending?.code !== code) pending = { code, key: requestKey() };
+    sessionStorage.setItem(IMPORT, JSON.stringify(pending));
+    const value = await post('/control/workspace-imports', { invitation_code: code },
+      { auth: false, headers: { 'Idempotency-Key': pending.key } });
+    sessionStorage.setItem(WORKSPACE, value.workspace.workspace_id);
     return value;
   }
+  const accessPolicy = () => get('/control/access-policy', { auth: false });
+  const listWorkspaces = () => get('/control/workspaces', { auth: false });
+  const createWorkspace = (title) => post('/control/workspaces', { title }, { auth: false });
+  async function ensureUser() {
+    try { return await get('/control/users/me', { auth: false }); }
+    catch (error) { if (error.status !== 401) throw error; }
+    // Registration detaches anonymous compute. Never silently discard an open temporary project.
+    try {
+      const existing = await currentLease();
+      if (!existing.lease.workspace_id) throw new ApiError(409, { message: '当前是临时工作区，请先导出内容并结束试用，再创建持久项目' });
+    } catch (error) { if (![401, 404, 410].includes(error.status)) throw error; }
+    const result = await post('/control/users', {}, { auth: false });
+    sessionStorage.setItem(RECOVERY, JSON.stringify(result));
+    return result;
+  }
+  async function login(userId, recoveryToken) {
+    const result = await post('/control/users/session', { user_id: userId, recovery_token: recoveryToken }, { auth: false });
+    sessionStorage.removeItem(WORKSPACE); sessionStorage.removeItem(TOKEN); sessionStorage.removeItem(BINDING);
+    lease = null; session = null;
+    return result;
+  }
+  async function createShare() {
+    if (!(await detect())) throw new ApiError(409, { message: '独立实例不支持持久项目分享' });
+    await currentLease();
+    if (!lease.workspace_id) throw new ApiError(409, { message: '当前是临时工作区，请先导出内容并保存到持久项目后再分享' });
+    return post(`/control/workspaces/${part(lease.workspace_id)}/invitations`, {}, { auth: false });
+  }
+  async function revokeShare(id) {
+    if (!lease?.workspace_id) throw new ApiError(409, { message: '没有持久项目' });
+    return request(`/control/workspaces/${part(lease.workspace_id)}/invitations/${part(id)}`, { method: 'DELETE', auth: false });
+  }
   async function release() {
-    try { if (sessionStorage.getItem(TOKEN)) await del('/api/sessions/me'); }
+    try {
+      if (sessionStorage.getItem(TOKEN)) {
+        try { await del('/api/sessions/me'); }
+        catch (error) { if (![401, 410].includes(error.status)) throw error; }
+      }
+    }
     finally {
-      try { if (managed) await request('/control/leases/current', { method: 'DELETE', auth: false }); }
+      try {
+        if (managed) {
+          try { await request('/control/leases/current', { method: 'DELETE', auth: false }); }
+          catch (error) { if (![401, 410].includes(error.status)) throw error; }
+        }
+      }
       finally {
         sessionStorage.removeItem(TOKEN); sessionStorage.removeItem(BINDING);
         session = null; lease = null;
@@ -199,6 +282,8 @@
   window.RuntimeAPI = {
     ApiError, TERMINAL, get, post, patch, put, del, part, bytes, run, follow, connect, enter, release, detect,
     currentLease, requestLease, waitLeaseActive, secondsLeft, loadSession, redeemShare,
+    accessPolicy, ensureUser, login, listWorkspaces, createWorkspace, createShare, revokeShare,
+    get recovery() { try { return JSON.parse(sessionStorage.getItem(RECOVERY)); } catch { return null; } },
     takePendingProject: () => { const v = sessionStorage.getItem(PENDING); if (v) sessionStorage.removeItem(PENDING); return v; },
     cancel: (id) => post(`/api/runs/${part(id)}/cancel`, {}),
     hasToken: () => !!sessionStorage.getItem(TOKEN),

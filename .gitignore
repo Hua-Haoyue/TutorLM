@@ -29,6 +29,7 @@ __pycache__/
 htmlcov/
 
 # Runtime data and delivery artifacts
+/tmp/
 var/
 .tutorlm-host/
 *.sqlite3

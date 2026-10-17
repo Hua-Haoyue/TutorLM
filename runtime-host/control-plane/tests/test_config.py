@@ -121,3 +121,9 @@ def test_workspace_retention_and_volume_names():
     assert config.workspace_volume_name(workspace_id).endswith('workspace-00000000000040008000000000000001')
     with pytest.raises(ValueError):
         config.workspace_volume_name('../../arbitrary-volume')
+
+
+def test_workspace_retention_inf_is_permanent():
+    config = ControlPlaneConfig.from_env({'CONTROL_PLANE_WORKSPACE_IDLE_TTL_SECONDS': 'inf'})
+    assert config.workspace_idle_ttl_seconds is None
+    assert config.describe()['workspace_idle_ttl_seconds'] is None

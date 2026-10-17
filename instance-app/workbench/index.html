@@ -127,8 +127,8 @@
         <form class="gate" id="gate" novalidate>
           <div class="gate__fields">
             <label class="field" id="invite-field" hidden>
-              <span class="label">应用体验码</span>
-              <input class="input" id="invite" type="password" autocomplete="off" spellcheck="false" placeholder="主办方提供的体验码">
+              <span class="label">邀请码</span>
+              <input class="input" id="invite" type="password" maxlength="128" autocomplete="off" spellcheck="false" placeholder="系统邀请码（开放模式可留空）">
             </label>
             <label class="field" id="share-field">
               <span class="label">分享码（可选）</span>
@@ -136,6 +136,12 @@
             </label>
           </div>
           <p class="gate__msg" id="gate-msg" role="alert" aria-live="assertive"></p>
+          <details style="margin:12px 0">
+            <summary>恢复已有用户</summary>
+            <label class="field"><span class="label">用户 UUID</span><input class="input" id="restore-user" autocomplete="username"></label>
+            <label class="field"><span class="label">恢复凭据</span><input class="input" id="restore-token" type="password" autocomplete="off"></label>
+            <button class="btn" id="restore-login" type="button">恢复登录</button>
+          </details>
           <div class="cta">
             <button class="btn btn--primary btn--lg" id="start" type="submit">开始试用 <svg class="ic"><use href="#i-arrow-r"/></svg></button>
             <button class="btn btn--lg" id="resume" type="button" hidden>继续上次试用 · <span id="resume-left" class="mono">--:--</span></button>

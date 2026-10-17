@@ -156,7 +156,8 @@ def test_p1_remote_provider_must_not_be_silently_faked(tmp_path, monkeypatch):
 
     def transport(request, timeout):
         calls.append(request)
-        return 200, json.dumps({'choices': [{'message': {'content': 'Remote answer'}}]}).encode()
+        content = json.dumps({'kind': 'concept', 'answer': 'Remote answer', 'diagnostic': None})
+        return 200, json.dumps({'choices': [{'message': {'content': content}}]}).encode()
 
     monkeypatch.setattr(openai_compatible, 'build_transport', lambda **kwargs: transport)
     env = _demo_env(

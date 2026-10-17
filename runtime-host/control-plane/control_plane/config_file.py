@@ -127,7 +127,7 @@ def parse_config_document(
     allowed = set(TABLES)
     unknown = sorted(set(document) - allowed)
     root_invitation: Any = _MISSING
-    for key in (ROOT_INVITATION_KEY, ROOT_INVITATION_KEY_PYTHON):
+    for key in (ROOT_INVITATION_KEY, ROOT_INVITATION_KEY_PYTHON, 'inviteonly'):
         if key in document:
             if not isinstance(document[key], bool):
                 raise ConfigError(
@@ -136,7 +136,7 @@ def parse_config_document(
             if root_invitation is not _MISSING and root_invitation != document[key]:
                 raise ConfigError(f"{source} 根级 invitationonly 与 invitation_only 取值冲突")
             root_invitation = document[key]
-    unknown = [key for key in unknown if key not in {ROOT_INVITATION_KEY, ROOT_INVITATION_KEY_PYTHON}]
+    unknown = [key for key in unknown if key not in {ROOT_INVITATION_KEY, ROOT_INVITATION_KEY_PYTHON, 'inviteonly'}]
     if unknown:
         raise ConfigError(
             f"{source} 未知的顶层配置段 {unknown}；只允许 {sorted(allowed)} 和根级 {ROOT_INVITATION_KEY}"

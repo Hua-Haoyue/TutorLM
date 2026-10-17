@@ -13,6 +13,8 @@ Distinct from a compute lease and from the outer user identity
 """
 from __future__ import annotations
 
+import hmac
+
 from fastapi import APIRouter, Depends, Request, Response
 
 from backend.host import errors as app_errors
@@ -22,6 +24,7 @@ from ..dependencies import get_state, require_session
 from ..schemas import SessionCreate
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+internal_router = APIRouter(prefix='/internal', include_in_schema=False)
 
 
 def _implicit_allowed(state: AppState) -> bool:
@@ -56,6 +59,22 @@ def create_session(
             "This instance requires an invite code; implicit local sessions are disabled"
         )
 
+    if config.app_bootstrap_token:
+        raise app_errors.InviteRequired('Managed sessions must be obtained through the control plane')
+    return issue_session(state, response)
+
+
+@internal_router.post('/app-session', status_code=201)
+def bootstrap_session(request: Request, response: Response, state: AppState = Depends(get_state)):
+    expected = state.config.app_bootstrap_token
+    supplied = request.headers.get('X-App-Bootstrap-Token', '')
+    if not expected or not hmac.compare_digest(expected, supplied):
+        raise app_errors.Forbidden('Invalid application bootstrap credential')
+    return issue_session(state, response)
+
+
+def issue_session(state, response):
+    config = state.config
     # The binding is always the env-provided workspace, never a request field.
     # A local/demo instance has none injected; the session then carries the same
     # stable local identity the Host uses for its single project.

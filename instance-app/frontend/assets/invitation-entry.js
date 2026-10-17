@@ -112,9 +112,8 @@ export function mountInvitationEntry(container, {
   let busy = false;
   // null 表示策略未知：表单保持 disabled，绝不当作 invitation_only=false 放行。
   let invitationOnly = null;
-  // 本挂载内由成功分享导入换来的 trial grant 对应的工作区。
-  // 只有它（或将来服务端显式 grant 字段）能免除邀请码；opts.workspaceId 不能。
-  let grantedWorkspaceId = null;
+  // Import remembers a destination, never an invitation exemption.
+  let importedWorkspaceId = null;
 
   // 分享导入副本的进程内缓存，键为 code + title；不落盘、不跨挂载共享。
   const importedWorkspaces = new Map();
@@ -192,8 +191,7 @@ export function mountInvitationEntry(container, {
     const enabled = !disposed && !busy && invitationOnly !== null;
     input.disabled = !enabled;
     button.disabled = !enabled;
-    // 仅在“邀请模式且尚无 trial grant”时必填；workspaceId 不构成授权。
-    input.required = invitationOnly === true && grantedWorkspaceId === null;
+    input.required = invitationOnly === true;
     input.setAttribute('aria-required', input.required ? 'true' : 'false');
     form.setAttribute('aria-busy', busy ? 'true' : 'false');
     retryButton.disabled = disposed || busy;
@@ -311,8 +309,8 @@ export function mountInvitationEntry(container, {
     }
     const entry = { workspace_id: importedId, workspace };
     importedWorkspaces.set(key, entry);
-    // 分享导入成功即取得该工作区的 trial grant：之后即使清空邀请码也能重试。
-    grantedWorkspaceId = importedId;
+    // Remember the copy for a subsequent system-invitation submission.
+    importedWorkspaceId = importedId;
     importKey = null;
     importKeyFor = null;
     if (!disposed) updateControls();
@@ -332,8 +330,7 @@ export function mountInvitationEntry(container, {
       setBusy(false);
       return;
     }
-    // 邀请模式下只有“已有 trial grant”才能免码；targetWorkspace 不构成授权。
-    const codeRequired = policy.invitationOnly === true && grantedWorkspaceId === null;
+    const codeRequired = policy.invitationOnly === true;
     if (codeRequired && !code) {
       setBusy(false);
       setError(TEXT.requiredError);
@@ -344,8 +341,8 @@ export function mountInvitationEntry(container, {
 
     let lease = null;
     try {
-      // 已取得的 trial grant（成功导入的副本）允许在无码重试时复用。
-      let requestWorkspace = targetWorkspace || grantedWorkspaceId;
+      // A copied workspace and a system invitation are independent inputs.
+      let requestWorkspace = importedWorkspaceId || targetWorkspace;
       let invitationCode;
       if (code.startsWith(SHARE_PREFIX)) {
         // 只有前缀用于路由；服务端仍会校验真实邀请码类型。
@@ -355,6 +352,12 @@ export function mountInvitationEntry(container, {
         // 只在真正新建副本时通知一次；复用缓存副本的重试不再重复回调，
         // 但即便随后的租约失败，调用方也已经知道副本已建立。
         if (result.fresh) notify(onImported, result.workspace, 'onImported');
+        if (policy.invitationOnly) {
+          input.value = '';
+          setStatus('副本已导入。');
+          setError('请填写系统邀请码以分配计算资源。');
+          return;
+        }
       } else if (code) {
         // 系统码或其他码原样上传，优先级完全由服务端判定。
         invitationCode = code;

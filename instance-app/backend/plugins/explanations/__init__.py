@@ -12,6 +12,7 @@ INPUT_SCHEMA = {
     "properties": {
         "node_id": {"type": "string", "minLength": 1, "maxLength": 128},
         "question": {"type": ["string", "null"], "maxLength": 1000},
+        "response_mode": {"type": "string", "enum": ["auto", "expand"]},
     },
 }
 
@@ -24,6 +25,7 @@ class ExplanationWorkflow:
         checkpoint(context)
         entity = context.container.explanations.explain(
             node_id=data.get("node_id"), question=data.get("question"), persist=False,
+            response_mode=data.get("response_mode", "auto"),
         )
         checkpoint(context)
         return Draft(

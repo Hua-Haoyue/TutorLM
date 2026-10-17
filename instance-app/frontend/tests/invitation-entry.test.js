@@ -198,7 +198,7 @@ test('under invitation-only, workspaceId alone is not authorization: the code st
 });
 
 test('share code imports once, then requests a lease with the new workspace_id', async () => {
-  const { env, calls } = makeEnv({ policy: { invitation_only: true } });
+  const { env, calls } = makeEnv({ policy: { invitation_only: false } });
   const container = new FakeElement('div');
   const imported = [];
   const leased = [];
@@ -223,7 +223,7 @@ test('share code imports once, then requests a lease with the new workspace_id',
 test('a lease failure after a successful import retries without re-cloning the source', async () => {
   let leaseFail = true;
   const { env, calls } = makeEnv({
-    policy: { invitation_only: true },
+    policy: { invitation_only: false },
     routes: {
       '/control/leases': () => (leaseFail ? jsonResponse(503, { error: { message: 'capacity' } }) : jsonResponse(201, { lease: { lease_id: 'lease-1' } })),
     },
@@ -257,7 +257,7 @@ test('a lease failure after a successful import retries without re-cloning the s
   handle.dispose();
 });
 
-test('after a successful share import, a code-less retry is allowed by the trial grant', async () => {
+test('after share import, gated allocation still requires a system invitation', async () => {
   let leaseFail = true;
   const { env, calls } = makeEnv({
     policy: { invitation_only: true },
@@ -272,13 +272,17 @@ test('after a successful share import, a code-less retry is allowed by the trial
   input.value = 'TLM-SHARE-abc';
   form(container).dispatch('submit', { preventDefault() {} });
   await flush();
-  assert.equal(findInput(container).required, false, 'the trial grant relaxed the requirement');
+  assert.equal(findInput(container).required, true, 'sharing does not relax invitation-only');
   input.value = '';                       // user clears the code before retrying
   leaseFail = false;
   form(container).dispatch('submit', { preventDefault() {} });
   await flush();
   assert.equal(imports(calls).length, 1, 'no re-import');
-  assert.deepEqual(leases(calls).at(-1).body, { workspace_id: 'ws-imported' });
+  assert.equal(leases(calls).length, 0, 'empty retry cannot allocate');
+  input.value = 'TLM-SYS-test';
+  form(container).dispatch('submit', { preventDefault() {} });
+  await flush();
+  assert.deepEqual(leases(calls).at(-1).body, { workspace_id: 'ws-imported', invitation_code: 'TLM-SYS-test' });
   handle.dispose();
 });
 

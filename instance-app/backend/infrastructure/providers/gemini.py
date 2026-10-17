@@ -36,6 +36,10 @@ class GeminiProvider:
                                      'temperature': 0}}
         if request.system:
             body['systemInstruction'] = {'parts': [{'text': request.system}]}
+        if request.json_object:
+            body['generationConfig']['responseMimeType'] = 'application/json'
+            if request.json_schema:
+                body['generationConfig']['responseSchema'] = request.json_schema
         http_request = urllib.request.Request(
             base + '/models/' + model + ':generateContent',
             data=json.dumps(body, ensure_ascii=False).encode('utf-8'), method='POST',

@@ -327,6 +327,24 @@ class _Layers:
             return self._file.strict(field, int)
         return default
 
+    def duration_or_inf(self, env_name: str, field: str, default: int | None) -> int | None:
+        if self._env.has(env_name):
+            raw = (self._env.text(env_name) or '').strip().lower()
+            if raw == 'inf':
+                return None
+            try:
+                return int(raw)
+            except ValueError as exc:
+                raise ConfigError(f"环境变量 {ENV_PREFIX}{env_name} 必须是正整数或 inf，收到 {raw!r}") from exc
+        if self._file is not None and self._file.has(field):
+            value = self._file._values[field]
+            if isinstance(value, str) and value.strip().lower() == 'inf':
+                return None
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ConfigError(f"配置项 {field} 必须是正整数或字符串 inf")
+            return value
+        return default
+
     def optional_int(self, env_name: str, field: str, default: int | None) -> int | None:
         if self._env.has(env_name):
             raw = self._env.text(env_name)
@@ -441,7 +459,8 @@ class ControlPlaneConfig:
     lease_ttl_seconds: int = 3600
     lease_idle_ttl_seconds: int = 0
     reclaim_on_idle: bool = False
-    workspace_idle_ttl_seconds: int = 4 * 60 * 60
+    workspace_idle_ttl_seconds: int | None = 4 * 60 * 60
+    workspace_permanent: bool = False
     page_heartbeat_timeout_seconds: int = 120
     page_close_grace_seconds: int = 5
 
@@ -515,7 +534,7 @@ class ControlPlaneConfig:
             raise ConfigError("CONTROL_PLANE_LEASE_TTL_SECONDS 必须 > 0")
         if self.lease_idle_ttl_seconds < 0:
             raise ConfigError("CONTROL_PLANE_LEASE_IDLE_TTL_SECONDS 不能为负")
-        if self.workspace_idle_ttl_seconds <= 0:
+        if self.workspace_idle_ttl_seconds is not None and self.workspace_idle_ttl_seconds <= 0:
             raise ConfigError('CONTROL_PLANE_WORKSPACE_IDLE_TTL_SECONDS must be positive')
         if self.page_heartbeat_timeout_seconds <= 0:
             raise ConfigError('CONTROL_PLANE_PAGE_HEARTBEAT_TIMEOUT_SECONDS must be positive')
@@ -658,6 +677,7 @@ class ControlPlaneConfig:
     #: TOML ``[control_plane]`` 键 -> dataclass 字段名。
     #: 只接受这些确切拼写（外加 ``invitationonly`` 别名），未知键直接报错。
     FILE_KEY_ALIASES: ClassVar[dict[str, str]] = {
+        "inviteonly": "invitation_only",
         "invitationonly": "invitation_only",
     }
 
@@ -713,7 +733,8 @@ class ControlPlaneConfig:
             lease_ttl_seconds=layers.int("LEASE_TTL_SECONDS", "lease_ttl_seconds", 3600),
             lease_idle_ttl_seconds=layers.int("LEASE_IDLE_TTL_SECONDS", "lease_idle_ttl_seconds", 0),
             reclaim_on_idle=layers.boolean("RECLAIM_ON_IDLE", "reclaim_on_idle", False),
-            workspace_idle_ttl_seconds=layers.int("WORKSPACE_IDLE_TTL_SECONDS", "workspace_idle_ttl_seconds", 14400),
+            workspace_idle_ttl_seconds=layers.duration_or_inf("WORKSPACE_IDLE_TTL_SECONDS", "workspace_idle_ttl_seconds", 14400),
+            workspace_permanent=layers.boolean("WORKSPACE_PERMANENT", "workspace_permanent", False),
             page_heartbeat_timeout_seconds=layers.int("PAGE_HEARTBEAT_TIMEOUT_SECONDS", "page_heartbeat_timeout_seconds", 120),
             page_close_grace_seconds=layers.int("PAGE_CLOSE_GRACE_SECONDS", "page_close_grace_seconds", 5),
             adapter=layers.string("ADAPTER", "adapter", ADAPTER_DOCKER, strip=True).lower(),
@@ -751,6 +772,7 @@ class ControlPlaneConfig:
             "admin_token": "test-admin-token",
             "token_pepper": "test-pepper",
             "gc_enabled": False,
+            "workspace_permanent": False,
             "ready_timeout_seconds": 1.0,
             "ready_poll_interval_seconds": 0.01,
             "instance_image": "tutorlm-host:test",
@@ -773,6 +795,7 @@ class ControlPlaneConfig:
             "lease_idle_ttl_seconds": self.lease_idle_ttl_seconds,
             "reclaim_on_idle": self.reclaim_on_idle,
             'workspace_idle_ttl_seconds': self.workspace_idle_ttl_seconds,
+            'workspace_permanent': self.workspace_permanent,
             'page_heartbeat_timeout_seconds': self.page_heartbeat_timeout_seconds,
             'page_close_grace_seconds': self.page_close_grace_seconds,
             "ready_timeout_seconds": self.ready_timeout_seconds,

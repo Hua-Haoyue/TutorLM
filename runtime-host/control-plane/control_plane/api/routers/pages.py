@@ -43,7 +43,14 @@ def heartbeat_page(page_id: UUID, lease=Depends(current_page_lease), store=Depen
 
 
 @router.post('/{lease_id}/pages/{page_id}/close', status_code=202)
-def close_page(page_id: UUID, lease=Depends(current_page_lease), store=Depends(get_store)):
+def close_page(page_id: UUID, lease=Depends(current_page_lease), store=Depends(get_store), allocator=Depends(get_allocator), config=Depends(get_config)):
     store.close_page(lease.lease_id, str(page_id))
-    # Never clear the shared lease Cookie here: a delayed response may belong to an old tab.
+    # A confirmed final page close releases compute immediately. A lost pagehide
+    # still follows the heartbeat timeout in GC, and a different live page keeps
+    # the shared lease alive.
+    deadline = store.page_deadline(lease.lease_id, config.page_heartbeat_timeout_seconds, 0)
+    released = deadline is not None and deadline <= allocator._clock()
+    if released:
+        final = allocator.release(lease.lease_id, reason='last_page_closed')
+        return {'lease_id': final.lease_id, 'page_id': str(page_id), 'status': str(final.state)}
     return {'lease_id': lease.lease_id, 'page_id': str(page_id), 'status': 'closing'}

@@ -54,13 +54,21 @@
     const shareInput = $('#share-code-input');
     let needInvite = false, controller = null, leased = false;
     const say = (text, err) => { msg.textContent = text || ''; msg.classList.toggle('err', !!err); };
+    $('#restore-login').onclick = async () => {
+      const user = $('#restore-user').value.trim(), token = $('#restore-token').value.trim();
+      if (!user || !token) { say('请输入用户 UUID 和恢复凭据', true); return; }
+      const button = $('#restore-login'); button.disabled = true;
+      try { await api.login(user, token); $('#restore-token').value = ''; say('登录已恢复，点击开始试用打开项目'); }
+      catch (error) { say(error.message, true); }
+      finally { button.disabled = false; }
+    };
 
     // Invite is needed for demo runtimes; behind a control plane the runtime is only reachable after a lease.
     async function probe() {
       try {
         const managed = await api.detect();
         if (managed) {
-          needInvite = !api.hasToken();
+          needInvite = (await api.accessPolicy()).invitation_only;
           try { const l = await api.currentLease(); showResume(l.lease); } catch { /* no lease yet */ }
         } else {
           const rt = await api.get('/api/runtime', { auth: false });
@@ -71,7 +79,8 @@
           }
         }
       } catch (e) { say('无法连接服务：' + e.message, true); }
-      $('#invite-field').hidden = !needInvite;
+      $('#invite-field').hidden = false;
+      invite.required = needInvite;
     }
     function showResume(lease) {
       const btn = $('#resume');
@@ -108,24 +117,19 @@
       e.preventDefault();
       const code = invite.value.trim();
       const shareCode = shareInput ? shareInput.value.trim() : '';
-      // One button, two fields: whatever the visitor filled decides the path.
-      if (!code && !shareCode) {
-        if (needInvite) { say('请输入应用体验码', true); invite.focus(); return; }
-      }
+      if (!code && needInvite) { say('请输入邀请码', true); invite.focus(); return; }
       say('');
       start.disabled = true;
       controller = new AbortController();
-      const managed = await api.detect().catch(() => false);
+      let managed;
+      try { managed = await api.detect(); }
+      catch (error) { start.disabled = false; say(error.message, true); return; }
       openBoot(managed);
       const t0 = performance.now(), secs = () => ((performance.now() - t0) / 1000).toFixed(1) + 's';
       let current = managed ? 'alloc' : 'ready';
-      let entered = false;
-      // 1) Get a session (and lease, when managed). With only a share code we
-      //    still try — the backend may issue a session as part of redemption —
-      //    so an invite_required here is not fatal when a share code is present.
-      if (code || needInvite) {
-        try {
+      try {
           await api.enter(code, {
+            shareCode,
             signal: controller.signal,
             onStep(k, leaseState) {
               if (k !== current) { step(current, 'done', secs()); current = k; }
@@ -133,56 +137,32 @@
               step(k, 'run', leaseState === 'pending' ? '启动中' : undefined);
             },
           });
-          entered = true;
-        } catch (err) {
+      } catch (err) {
           if (err.name === 'AbortError') return;
-          if (shareCode && (err.status === 401 || err.status === 403)) {
-            // Let the share redemption decide; do not force an invite yet.
-          } else {
             boot.hidden = true; start.disabled = false;
             if (err.status === 503 && managed && current === 'alloc') {
               sessionStorage.setItem(RETRY_KEY, String(err.retryAfter || 15));
-              location.href = 'busy.html';
+              say('槽位已满，请稍后重试；有系统邀请码时可优先分配', true);
               return;
             }
             if (err.status === 401 || err.status === 403) {
               needInvite = true; $('#invite-field').hidden = false;
-              say(err.code === 'invite_required' ? '请输入应用体验码' : '体验码无效或已失效', true);
+              say(err.message || '邀请码无效或已失效', true);
               invite.select();
               return;
             }
             if (err.status === 429) { say('同时在线的会话已达上限，请稍后再试', true); return; }
             say(err.message, true);
             return;
-          }
-        }
       }
-      // 2) Redeem the share code, if any: server copies the shared workspace.
-      if (shareCode) {
-        try {
-          current = 'ready'; step('ready', 'run', '复制副本');
-          await api.redeemShare(shareCode);
-        } catch (err) {
-          if (err.name === 'AbortError') return;
-          boot.hidden = true; start.disabled = false;
-          if (err.status === 401 || err.status === 403) {
-            needInvite = true; $('#invite-field').hidden = false;
-            say('分享码需要先登录：请同时输入应用体验码', true);
-            invite.focus();
-            return;
-          }
-          say(err.status === 404 ? '分享码无效或已过期'
-            : err.code === 'share_redeem_not_supported' ? '这个实例不处理分享码：分享与导入由控制面提供，单实例模式下暂不可用'
-            : (err.message || '分享码兑换失败'), true);
-          return;
-        }
-      }
-      if (entered || shareCode) step(current, 'done', secs());
+      step(current, 'done', secs());
       setText('#boot-msg', '就绪，正在进入…');
       location.href = 'workspace.html';
     };
 
     await probe();
+    const shared = new URLSearchParams(location.search).get('share');
+    if (shared && shareInput) { shareInput.value = shared; history.replaceState(null, '', location.pathname); }
     refreshCapacity();
     setInterval(refreshCapacity, 10000);
     // Arriving from busy.html with a reserved lease: continue automatically when no invite is needed.
@@ -212,7 +192,7 @@
       tries += 1; setText('#d-tries', `${tries} 次`);
       const stamp = () => new Date().toLocaleTimeString('zh-CN', { hour12: false });
       try {
-        if (await api.detect()) await api.requestLease();
+        if (await api.detect()) { location.href = 'index.html?continue=1'; return; }
         else await api.get('/health/ready', { auth: false });
         setText('#d-last', `${stamp()} · 可用`);
         document.body.classList.add('is-ok');

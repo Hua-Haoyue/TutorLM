@@ -73,6 +73,7 @@ services:
       # The application image is a runtime artifact that cannot be in a TOML
       # file's path-independent policy; keep it here.
       CONTROL_PLANE_INSTANCE_IMAGE: ${TUTORLM_INSTANCE_IMAGE:?Set an existing application image}
+      CONTROL_PLANE_WORKSPACE_IDLE_TTL_SECONDS: ${TUTORLM_WORKSPACE_IDLE_TTL_SECONDS:-inf}
     volumes:
       - control-plane-data:/data
       - /var/run/docker.sock:/var/run/docker.sock

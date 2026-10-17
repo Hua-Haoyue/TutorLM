@@ -15,7 +15,7 @@ from fastapi import FastAPI
 
 from control_plane.allocator import Allocator
 from control_plane.api.errors import register_error_handlers
-from control_plane.api.routers import admin, health, invitations, leases, pages, workspaces
+from control_plane.api.routers import admin, health, invitations, leases, pages, workspaces, app_session
 from control_plane.config import ControlPlaneConfig
 from control_plane.invitations import AccessPolicy, InvitationService
 from control_plane.lifecycle import SlotLifecycle
@@ -172,6 +172,7 @@ def create_app(
     app.include_router(workspaces.router)
     app.include_router(invitations.router)
     app.include_router(pages.router)
+    app.include_router(app_session.router)
     return app
 
 

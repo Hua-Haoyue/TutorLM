@@ -43,6 +43,7 @@ from control_plane.errors import (
 )
 from control_plane.ports import InstanceSpec, RuntimeAdapter
 from control_plane.store import ControlPlaneStore
+from control_plane.security import app_bootstrap_token
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +141,10 @@ class SlotLifecycle:
         volume_name = config.volume_name(slot.slot_id)
         volume_must_exist = False
         lease = self._store.require_lease(slot.lease_id) if slot.lease_id else None
+        if lease:
+            env['TUTORLM_APP_BOOTSTRAP_TOKEN'] = app_bootstrap_token(config, self._store, lease)
+            env['TUTORLM_SESSION_DATA_DIR'] = self._session_data_dir(slot.slot_id)
+            env['TUTORLM_SESSION_TTL_SECONDS'] = str(max(1, int(lease.expires_at - self._store._clock())))
         if lease and lease.workspace_id:
             workspace = self._store.require_workspace(lease.workspace_id)
             volume_must_exist = bool(workspace.storage_initialized)
@@ -161,6 +166,13 @@ class SlotLifecycle:
                 # 避免被卷复制带走成为接收者身份。
                 'TUTORLM_SESSION_DATA_DIR': self._session_data_dir(slot.slot_id),
             })
+            copies = [copy for copy in self._store.list_workspace_copies(states=('copied',))
+                      if copy.destination_workspace_id == workspace.workspace_id]
+            if workspace.source_workspace_id or copies:
+                if len(copies) != 1 or (workspace.source_workspace_id and copies[0].source_workspace_id != workspace.source_workspace_id):
+                    raise RuntimeUnavailable('Workspace copy provenance is missing or ambiguous')
+                env['TUTORLM_WORKSPACE_SOURCE_ID'] = copies[0].source_workspace_id
+                env['TUTORLM_WORKSPACE_COPY_ID'] = copies[0].copy_id
         return InstanceSpec(
             slot_id=slot.slot_id,
             generation=generation,

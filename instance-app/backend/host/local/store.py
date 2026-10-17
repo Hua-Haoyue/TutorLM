@@ -390,6 +390,10 @@ class LocalStore:
         conn = self._connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
+            previous = conn.execute('SELECT current_workspace_id FROM workspace_binding WHERE id=1').fetchone()
+            if previous is not None:
+                conn.execute('UPDATE projects SET workspace_id=? WHERE workspace_id=?',
+                             (workspace_id, previous['current_workspace_id']))
             conn.execute(
                 "INSERT INTO workspace_binding (id, current_workspace_id, origin_workspace_id, owner_id,"
                 " copy_id, updated_at) VALUES (1, ?, ?, ?, ?, ?)"

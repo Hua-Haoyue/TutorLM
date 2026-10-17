@@ -37,14 +37,48 @@ Production gateways must serve these pages and assets, plus the reader modules
 at `/static/reader/` and built PDF.js resources at `/static/pdfjs/`, on one origin.
 Tracking these files does not build or deploy them automatically.
 
+## Markdown Reading
+
+The reader and explanation cards support pipe tables (including column alignment),
+nested ordered/unordered lists, read-only task checkboxes, links, strikethrough,
+fenced code blocks, block quotes, heading levels 1-6 and the existing KaTeX math.
+Tables scroll horizontally within the reader on narrow screens. Source ranges
+are retained per text block and table cell for node creation and source lookup.
+Raw HTML stays inert and remote images show alternative text without loading.
+The bundled markdown-it 15.0.3 parser and its license are under `assets/markdown-it/`.
+
+Run the focused regression with `node --test scripts/test-markdown.cjs` from this
+directory. `scripts/fixtures/markdown-support.md` is a manual upload sample;
+`scripts/browser-markdown-smoke.cjs` checks upload, rendering, table-cell source
+resolution, reload, search and desktop/mobile layout against a disposable backend.
+
 ## Current Integration Boundaries
 
 Business data uses the actual `/api` endpoints and requires an application Bearer.
 PDF rendering uses authenticated original-file reads and the shared Reader modules.
 Drawing and view preferences are browser-local rather than server project content.
-System invitation admission, durable project selection and sharing/import are not
-fully connected to the control-plane workflow yet. Application project IDs must
-not be substituted for control-plane workspace UUIDs.
+Managed entry reads the control-plane access policy, authenticates a persistent
+user, selects or creates a durable workspace and requests a lease. In open mode
+the system invitation is optional; in invitation-only mode it is required even
+when importing a share. Managed app sessions come from `/control/app-session`,
+not a second application experience code. Standalone demo sessions are unchanged.
+Application project IDs must not be substituted for control-plane workspace UUIDs.
+
+The share button issues a unique copy string through the control plane, supports
+copy and revocation, and does not generate QR codes or public project IDs. Import
+creates an independent receiver-owned project before requesting compute for it.
+Sharing may stop source compute for consistent copying. It never grants priority
+or bypasses invitation-only allocation. See `../../contracts/instance-runtime-v4.md`.
+User recovery credentials are returned at initial creation and are available
+in that tab's account panel; save them privately for login recovery on the entry
+page. Closing the workbench releases compute but preserves durable project data
+until the separate idle retention deadline.
+
+Test access flow contracts with:
+
+```powershell
+node --test instance-app/workbench/scripts/test-access.cjs
+```
 
 For the browser smoke test, set `PLAYWRIGHT_MODULE` to a Playwright installation,
 `APP_URL` to the local workbench and `APP_INVITE` to the demo invite, then run:
@@ -54,5 +88,14 @@ node instance-app/workbench/scripts/browser-smoke.cjs
 ```
 
 The test creates temporary project content. Use a disposable local backend.
+
+For an isolated managed Docker stack with offline `fake` models, the opt-in
+`scripts/managed-smoke.py --run` checks real project copying, receiver edit
+isolation, revocation and invitation priority through HTTP. It requires a
+loopback gateway, a separate loopback admin origin and an explicit admin token.
+`scripts/browser-access-smoke.cjs` tests the managed entry and share UI using
+`APP_URL` and optionally `APP_INVITE` for invitation-only mode. These tests
+create persistent test projects and can preempt test compute; never use a
+production stack. Remove test volumes with the disposable stack afterwards.
 Screenshots and test output under `.work/` are ignored. The optional cover image
 is `assets/cover.jpg`; the page displays a placeholder when it is absent.

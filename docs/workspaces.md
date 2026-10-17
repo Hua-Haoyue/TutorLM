@@ -1,5 +1,10 @@
 # 持久工作区
 
+当前准入与分享集成见 [v4 契约](../contracts/instance-runtime-v4.md)：
+分享字符串只允许复制项目，不授予计算权限。邀请模式下，导入副本申请槽位仍必须提供
+系统邀请码；历史 trial grant 不再绕过此规则。受控应用会话使用 `/control/app-session`，
+不要求第二次输入应用体验码。下文涉及旧 trial grant 的说明以本段与 v4 为准。
+
 ## 模型
 
 ```text
@@ -55,7 +60,8 @@ HTTP 只适合本地开发；对外提供恢复凭据和私有数据前必须配
 ## 两个独立时钟
 
 - 计算时钟：`CONTROL_PLANE_LEASE_TTL_SECONDS`，默认 3600 秒，届满拒绝准入并由 GC 回收容器。
-- 项目时钟：`CONTROL_PLANE_WORKSPACE_IDLE_TTL_SECONDS`，默认 14400 秒，从该项目最后使用时刻计算。
+- 项目时钟：`CONTROL_PLANE_WORKSPACE_IDLE_TTL_SECONDS`；设为 `inf` 时永久保留，
+  重新登录后仍可列出并打开历史项目；设为正整数时才按最后使用时间自动清理。
 
 ## 页面关闭释放计算
 
@@ -74,8 +80,8 @@ HTTP 只适合本地开发；对外提供恢复凭据和私有数据前必须配
 延迟到达的旧页面通知不能释放新租约，也不清除共享 Cookie。
 用户身份和项目数据都不会因为关闭页面而删除；匿名临时卷仍按 v1 回收。
 
-`pagehide` 发送通知；服务端在最后一个页面关闭后等待默认 5 秒宽限，再由下一轮 GC 回收，
-因此默认回收延迟约为 5 秒加最多一个 30 秒 GC 周期，不承诺浏览器关闭瞬间完成 Docker 停止。
+`pagehide` 发送通知；服务端确认这是最后一个页面后直接释放计算租约，不再等待关闭宽限期。
+若浏览器没有送达 `pagehide`，仍由心跳超时和 GC 兜底，不承诺浏览器关闭瞬间一定送达通知。
 刷新、后退缓存恢复或新页面在宽限期内登记则继续使用租约；其他标签页还有心跳时不回收。
 不能用切换标签、窗口最小化等可见性变化直接判定用户已关闭页面。
 
@@ -148,8 +154,8 @@ Compose 的 `.env` 使用 `TUTORLM_LEASE_TTL_SECONDS`、`TUTORLM_WORKSPACE_IDLE_
 | `DELETE /control/workspaces/{uuid}/invitations/{invitation_id}` | 用户 Cookie / 头 | 撤销分享码 |
 | `POST /control/workspace-imports` | 用户 Cookie / 头 | 用分享码导入，返回 `{workspace, reused}`，支持 `Idempotency-Key` |
 
-- 副本是接收用户的新 UUID、新卷，源项目不共享挂载；导入后为副本记录普通 trial 授权，
-  因此 `invitation_only=true` 时接收用户也能正常打开自己的副本。
+- 副本是接收用户的新 UUID、新卷，源项目不共享挂载。导入只复制内容，不授予计算权限；
+  `invitation_only=true` 时接收用户还需系统邀请码申请副本的计算租约。
 - 只有声明了 v3 `content_only` 存储布局的项目才能签发分享码；否则拒绝。
 - 导入会先停止源项目的计算再复制，源端进行中的任务可能被打断；失败不发布半成品。
 

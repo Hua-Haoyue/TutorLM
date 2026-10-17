@@ -134,12 +134,10 @@ def decide_workspace_binding(
     reasons: list[str] = []
     if not source_workspace_id:
         reasons.append("缺少 TUTORLM_WORKSPACE_SOURCE_ID：无法证明复制血缘")
-    elif existing.origin_workspace_id != source_workspace_id:
-        reasons.append("TUTORLM_WORKSPACE_SOURCE_ID 与库内 origin_workspace_id 不匹配")
-    if copy_id is not None and existing.copy_id is not None and existing.copy_id != copy_id:
-        reasons.append("TUTORLM_WORKSPACE_COPY_ID 与库内 copy_id 不匹配")
-    if existing.owner_id == owner_id:
-        reasons.append("源与目标 owner 相同却缺少迁移标识：拒绝静默重绑")
+    elif existing.current_workspace_id != source_workspace_id:
+        reasons.append("TUTORLM_WORKSPACE_SOURCE_ID 与库内 current_workspace_id 不匹配")
+    if not copy_id:
+        reasons.append("缺少 TUTORLM_WORKSPACE_COPY_ID：无法证明此次复制操作")
 
     if reasons:
         raise WorkspaceRebindForbidden(

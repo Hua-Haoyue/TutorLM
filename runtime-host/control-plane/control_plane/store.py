@@ -474,7 +474,7 @@ class ControlPlaneStore:
             (workspace_id, str(CopyState.PREPARING)),
         ).fetchone() is not None
 
-    def _owned_workspace(self, conn, workspace_id: str, user_id: str, idle_seconds: int) -> Workspace:
+    def _owned_workspace(self, conn, workspace_id: str, user_id: str, idle_seconds: int | None) -> Workspace:
         row = conn.execute(
             'SELECT * FROM workspaces WHERE workspace_id=? AND user_id=?', (workspace_id, user_id),
         ).fetchone()
@@ -487,13 +487,14 @@ class ControlPlaneStore:
             workspace_id=workspace.workspace_id,
         )
         if workspace.state != 'active' or (
-            workspace.last_used_at < self._clock() - idle_seconds
+            idle_seconds is not None
+            and workspace.last_used_at < self._clock() - idle_seconds
             and not self._workspace_in_use(conn, workspace_id)
         ):
             raise WorkspaceExpired('Workspace expired or is being deleted')
         return workspace
 
-    def owned_workspace(self, workspace_id: str, user_id: str, idle_seconds: int, *, touch: bool = False) -> Workspace:
+    def owned_workspace(self, workspace_id: str, user_id: str, idle_seconds: int | None, *, touch: bool = False) -> Workspace:
         with self.transaction() as conn:
             workspace = self._owned_workspace(conn, workspace_id, user_id, idle_seconds)
             if touch:
@@ -711,10 +712,10 @@ class ControlPlaneStore:
                     )
             conn.execute(
                 'INSERT INTO workspaces(workspace_id,user_id,title,volume_name,state,created_at,'
-                'last_used_at,data_directory,storage_layout) VALUES(?,?,?,?,?,?,?,?,?)',
+                'last_used_at,data_directory,storage_layout,source_workspace_id) VALUES(?,?,?,?,?,?,?,?,?,?)',
                 (
                     destination_workspace_id, recipient_user_id, title, destination_volume_name,
-                    'copying', now, now, canonical, STORAGE_LAYOUT_CONTENT_ONLY,
+                    'copying', now, now, canonical, STORAGE_LAYOUT_CONTENT_ONLY, source_workspace_id,
                 ),
             )
             conn.execute(

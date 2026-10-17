@@ -191,7 +191,9 @@ def main():
             else:
                 die(3, "refusing special file: " + entry.path)
 
-    for path in chain:
+    # target_root was already finalized by the post-order walk. Repeating chmod
+    # after chown fails under CAP_CHOWN-only permissions (no CAP_FOWNER).
+    for path in reversed(chain[:-1]):
         fix(path, True)
     sys.stdout.write("copied\n")
     return 0
@@ -253,6 +255,9 @@ class DockerRuntimeAdapter:
                 )
 
     # ------------------------------------------------------------ volumes
+    def volume_exists(self, name: str) -> bool:
+        return self._lookup_volume(name) is not None
+
     def ensure_volume(self, spec: VolumeSpec) -> bool:
         try:
             volume = self._client.volumes.get(spec.name)
@@ -590,6 +595,54 @@ class DockerRuntimeAdapter:
         return None
 
     # ------------------------------------------------------------ 生命周期
+    def _initialize_workspace_directory(self, spec: InstanceSpec) -> None:
+        """Hand only a new workspace data directory to the non-root app user."""
+        from pathlib import PurePosixPath
+        data = PurePosixPath(spec.env['TUTORLM_DATA_DIR'])
+        try:
+            relative = data.relative_to(PurePosixPath(spec.mount_path))
+        except ValueError:
+            raise RuntimeUnavailable('Workspace data directory is outside its volume') from None
+        if not relative.parts or '..' in relative.parts:
+            raise RuntimeUnavailable('Workspace initialization requires a data subdirectory')
+        self._require_local_image(spec.image)
+        script = '''import os, pathlib, stat, sys
+root = pathlib.Path('/workspace-init')
+parts = pathlib.PurePosixPath(sys.argv[1]).parts
+current = root
+for part in parts:
+    current = current / part
+    try:
+        current.mkdir(mode=0o755)
+    except FileExistsError:
+        pass
+    info = current.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid not in (0, 10001):
+        raise RuntimeError('Unsafe workspace directory')
+info = current.lstat()
+if info.st_uid == 0:
+    if any(current.iterdir()):
+        raise RuntimeError('Refusing to change ownership of existing project data')
+    os.chmod(current, 0o755)
+    os.chown(current, 10001, 10001)
+'''
+        helper = None
+        name = f'{spec.container_name}-init-{uuid.uuid4().hex[:8]}'
+        try:
+            helper = self._client.containers.create(
+                image=spec.image, name=name, entrypoint=['python', '-c', script, str(relative)],
+                user='0:0', detach=True, network_mode='none', read_only=True,
+                mounts=[Mount(target='/workspace-init', source=spec.volume_name, type='volume')],
+                cap_drop=['ALL'], cap_add=['CHOWN'], security_opt=['no-new-privileges:true'],
+                mem_limit='128m', pids_limit=32, labels={**spec.labels, 'tutorlm.helper': 'workspace-init'},
+            )
+            helper.start()
+            if self._wait_for_helper(helper, 30) != 0:
+                raise RuntimeUnavailable('Workspace directory initialization failed')
+        finally:
+            if self._stop_and_remove_helper(helper, name):
+                raise RuntimeUnavailable('Workspace initialization helper cleanup failed')
+
     def create(self, spec: InstanceSpec) -> RuntimeStatus:
         self.ensure_volume(VolumeSpec(name=spec.volume_name, labels=spec.labels, must_exist=spec.volume_must_exist))
         try:
@@ -600,6 +653,9 @@ class DockerRuntimeAdapter:
             raise
         except Exception:
             pass
+
+        if spec.env.get('TUTORLM_PERSISTENT_WORKSPACE') == 'true' and spec.env.get('TUTORLM_WORKSPACE_SUBDIRECTORY') != '.':
+            self._initialize_workspace_directory(spec)
 
         docker_spec: dict[str, Any] = {
             "image": spec.image,

@@ -31,6 +31,8 @@ class GenerateRequest:
     context: list[str] = field(default_factory=list)
     max_tokens: int | None = None
     timeout_seconds: float | None = None
+    json_object: bool = False
+    json_schema: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)

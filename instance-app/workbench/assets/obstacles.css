@@ -1,0 +1,16 @@
+.gnode.sel .xpl { padding-top: 0; }
+.gnode.sel .answer .katex { font-size: 1.05em; }
+.gnode.sel .answer .katex-display { overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+.gnode.sel .answer .math-block { max-width: 100%; overflow-x: auto; }
+@media (max-width: 700px) {
+  .canvas > .inspector { position: static; flex: none; width: 100%; max-height: 160px; overflow: auto; box-shadow: none; }
+  .gnode.sel { max-height: min(560px, 54dvh); width: min(360px, calc(100vw - 40px)); }
+}
+.tool-visual .pdfv-page { touch-action: none; cursor: crosshair; user-select: none; }
+.tool-visual .pdfv-page .textLayer { pointer-events: none; }
+.visual-selection { position: absolute; z-index: 12; border: 2px solid #287866; background: #28786622; pointer-events: none; }
+.visual-original { display: block; max-width: 100%; height: auto; margin: 16px auto; }
+.explanation-depth { display: flex; gap: 0; margin-bottom: 8px; border-bottom: 1px solid #ddd; }
+.explanation-depth button { flex: 1; border: 0; background: transparent; color: #666; font: inherit; font-size: 12px; padding: 7px 3px; cursor: pointer; }
+.explanation-depth button[aria-pressed="true"] { color: #216b59; box-shadow: inset 0 -2px #216b59; }
+#ask-object { max-width: 100%; margin: 0 0 8px; font-size: 12px; height: 30px; }

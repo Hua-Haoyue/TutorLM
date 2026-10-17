@@ -137,6 +137,7 @@ class HostConfig:
     persistent_workspace: bool = False
     allow_implicit_session: bool = False
     invite_code: str | None = None
+    app_bootstrap_token: str = field(default='', repr=False, compare=False)
     workspace_source_id: str | None = None
     workspace_copy_id: str | None = None
     session_ttl_seconds: int = 3600
@@ -258,6 +259,7 @@ class HostConfig:
             persistent_workspace=persistent,
             allow_implicit_session=_flag(env, "TUTORLM_ALLOW_IMPLICIT_SESSION", False),
             invite_code=_optional(env, "TUTORLM_INVITE_CODE"),
+            app_bootstrap_token=_optional(env, 'TUTORLM_APP_BOOTSTRAP_TOKEN') or '',
             workspace_source_id=_uuid_or_none(env, "TUTORLM_WORKSPACE_SOURCE_ID"),
             workspace_copy_id=_uuid_or_none(env, "TUTORLM_WORKSPACE_COPY_ID"),
             session_ttl_seconds=_int(env, "TUTORLM_SESSION_TTL_SECONDS", 3600),

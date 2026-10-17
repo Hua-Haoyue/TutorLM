@@ -36,6 +36,15 @@ pre.raw { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; min-height:
 .answer ul, .answer ol { padding-left: 1.2em; }
 .answer code { font: .85em var(--mono); background: var(--paper-2); padding: 0 3px; }
 .answer .math { font-family: var(--serif); font-style: italic; }
+.gnode.sel .xpl { border: 0; margin-top: 0; }
+.gnode.sel .xpl__body { padding-top: 0; }
+.obstacle-check { padding: 8px 12px; font-size: 12px; overflow-wrap: anywhere; }
+.obstacle-check p { margin: 0 0 8px; }
+.obstacle-choices, .node-learning-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.obstacle-choices .btn { height: auto; min-height: 30px; white-space: normal; text-align: left; max-width: 100%; }
+.node-learning-actions { padding: 6px 12px; align-items: center; }
+.obstacle-error { padding: 8px 12px; font-size: 12px; color: var(--red, #a82d30); }
+.gnode.sel .answer pre { overflow-x: auto; max-width: 100%; }
 .disc__by { font-size: 10px; margin-top: 4px; }
 .disc__list { max-height: none; }
 .disc__empty { font-size: 12px; margin: 0 0 8px; }
@@ -82,3 +91,29 @@ select.input { appearance: auto; }
   .narr > div + div { padding-left: 0 !important; margin-top: 12px; }
   .gnode.sel { width: min(332px, calc(100vw - 32px)); }
 }
+.doc .md-table, .answer .md-table, .note .md-table {
+  max-width: 100%; overflow-x: auto; margin: 1.2em 0;
+  border: 1px solid var(--line); border-radius: 4px;
+}
+.md-table table { width: 100%; border-collapse: collapse; font-size: .9em; line-height: 1.6; }
+.md-table th, .md-table td {
+  min-width: 100px; padding: 9px 12px; vertical-align: top;
+  text-align: left; border-bottom: 1px solid var(--line-soft); overflow-wrap: anywhere;
+}
+.md-table th { background: var(--paper-2); color: var(--ink); font-weight: 600; }
+.md-table tbody tr:last-child td { border-bottom: 0; }
+.md-table tbody tr:nth-child(even) { background: var(--paper-2); }
+.md-table:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.doc pre code, .answer pre code, .note pre code { display: block; padding: 0; border: 0; background: none; font-size: inherit; }
+.doc li > p, .answer li > p { margin-bottom: .5em; }
+.doc li > ul, .doc li > ol, .answer li > ul, .answer li > ol { margin-top: .3em; margin-bottom: .3em; }
+.task-list-item { list-style: none; }
+.task-list-item > input, .task-list-item > p > input { margin-right: 6px; accent-color: var(--ink); }
+.md-image-alt { color: var(--muted); font-style: italic; overflow-wrap: anywhere; }
+.doc :is(h1, h2, h3, h4, h5, h6) { font-family: var(--sans); line-height: 1.4; letter-spacing: 0; text-transform: none; }
+.doc h1 { font-size: 25px; margin: 1.4em 0 .7em; }
+.doc h2 { font-size: 21px; line-height: 1.4; margin: 1.5em 0 .7em; }
+.doc h3 { font-size: 18px; }
+.doc :is(h4, h5, h6) { font-size: 16px; margin: 1.4em 0 .6em; }
+.answer :is(h1, h2, h3, h4, h5, h6), .note :is(h1, h2, h3, h4, h5, h6) { font: 600 14px/1.4 var(--sans); letter-spacing: 0; margin: 10px 0 6px; }
+.doc a, .answer a, .note a { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }

@@ -118,12 +118,15 @@ class OpenAICompatibleProvider:
             joined = "\n\n".join(request.context)
             content = f"{joined}\n\n{content}"
         messages.append({"role": "user", "content": content})
-        return {
+        body = {
             "model": self._model,
             "messages": messages,
             "max_tokens": int(request.max_tokens or self._max_tokens),
             "temperature": 0,
         }
+        if request.json_object:
+            body['response_format'] = {'type': 'json_object'}
+        return body
 
     def _parse(self, payload: bytes, request: GenerateRequest) -> GenerateResult:
         try:

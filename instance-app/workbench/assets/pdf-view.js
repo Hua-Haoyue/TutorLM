@@ -144,6 +144,21 @@ export async function openPdfView(container, { data, ref, root, width, pixelScal
     numPages: info.num_pages,
     pages: pages.map((p) => ({ n: p.n, el: p.el })),
     container,
+    async crop(n, rect) {
+      const p = pages[n - 1];
+      if (!p) throw new Error('PDF page unavailable');
+      await render(p);
+      if (!p.textLayer) throw new Error('PDF page has not finished rendering');
+      const bounds = p.el.getBoundingClientRect();
+      const f = { x: clamp01((rect.left - bounds.left) / bounds.width), y: clamp01((rect.top - bounds.top) / bounds.height),
+        w: clamp01(rect.width / bounds.width), h: clamp01(rect.height / bounds.height) };
+      const source = p.el.querySelector('canvas'), canvas = document.createElement('canvas');
+      const scale = Math.min(1, 2400 / Math.max(source.width * f.w, source.height * f.h));
+      canvas.width = Math.max(1, Math.round(source.width * f.w * scale)); canvas.height = Math.max(1, Math.round(source.height * f.h * scale));
+      canvas.getContext('2d').drawImage(source, f.x * source.width, f.y * source.height, f.w * source.width, f.h * source.height, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      return { blob, selector: { type: 'pdf', coordinate_space: 'normalized-cropbox-unrotated-top-left', pages: [{ page: n, rects: [toCanonicalRect(p, f)] }] } };
+    },
 
     /* Current DOM selection → reference draft from the adapter (null when not in this PDF). */
     selection() {
@@ -152,7 +167,7 @@ export async function openPdfView(container, { data, ref, root, width, pixelScal
       const range = sel.getRangeAt(0);
       if (!container.contains(range.commonAncestorContainer)) return null;
       const quote = collapse(sel.toString()).slice(0, 2000);
-      if (quote.length < 2) return null;
+      if (quote.length < 1) return null;
       const anchors = clientRectsToPages(range.getClientRects());
       if (!anchors.length) return null;
       // Selectable text only exists on rendered pages, whose items are loaded: the
@@ -161,7 +176,12 @@ export async function openPdfView(container, { data, ref, root, width, pixelScal
       const items = pages[anchors[0].page - 1].items;
       if (items) {
         const text = collapse(items.map((it) => (typeof it.str === 'string' ? it.str : '')).join(' '));
-        const at = text.indexOf(quote);
+        const startEl = (range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement).closest('.textLayer > span');
+        const itemIndex = pages[anchors[0].page - 1].textLayer?.textDivs.indexOf(startEl);
+        const preceding = itemIndex >= 0 ? collapse(items.slice(0, itemIndex).map(it => it.str || '').join(' ')) : '';
+        const candidates = [...text.matchAll(new RegExp(quote.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'))];
+        const matching = candidates.filter(m => m.index >= preceding.length && m.index <= preceding.length + (items[itemIndex]?.str?.length || 0) + 2);
+        const at = matching.length === 1 ? matching[0].index : candidates.length === 1 ? candidates[0].index : -1;
         if (at >= 0) { prefix = text.slice(Math.max(0, at - 32), at); suffix = text.slice(at + quote.length, at + quote.length + 32); }
       }
       const draft = reader.selectPages({ pages: anchors, quote, prefix, suffix });

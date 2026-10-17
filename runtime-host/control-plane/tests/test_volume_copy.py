@@ -694,6 +694,30 @@ def _ok_volumes(stub: _StubClient) -> set[str]:
     return {name for name, volume in stub.volumes.store.items() if volume.removed_with == []}
 
 
+def test_copy_script_never_chmods_a_directory_after_handing_it_to_app(tmp_path, monkeypatch):
+    import os
+    import sys
+    from control_plane.runtime.docker_adapter import _COPY_SCRIPT
+
+    source, target = tmp_path / 'source', tmp_path / 'target'
+    source.mkdir(); target.mkdir()
+    (source / 'notes.md').write_text('Original content')
+    handed_off = set()
+    chmod = os.chmod
+    def restricted_chmod(path, mode):
+        assert str(path) not in handed_off, 'CAP_CHOWN does not permit chmod after chown'
+        chmod(path, mode)
+    monkeypatch.setattr(os, 'chmod', restricted_chmod)
+    monkeypatch.setattr(os, 'lchown', lambda path, uid, gid: handed_off.add(str(path)), raising=False)
+    monkeypatch.setattr(sys, 'argv', ['helper', '', 'users/owner/workspaces/copy', '10001', '10001', '30', '[]'])
+    script = _COPY_SCRIPT.replace('SRC_ROOT = "/copy/source"', f'SRC_ROOT = {str(source)!r}').replace(
+        'DST_ROOT = "/copy/target"', f'DST_ROOT = {str(target)!r}')
+    with pytest.raises(SystemExit) as done:
+        exec(compile(script, '<volume-copy-helper>', 'exec'), {})
+    assert done.value.code == 0
+    assert (target / 'users/owner/workspaces/copy/notes.md').read_text() == 'Original content'
+
+
 def _failing_remove_factory(stub: _StubClient, remover):
     original = stub.containers.create
 

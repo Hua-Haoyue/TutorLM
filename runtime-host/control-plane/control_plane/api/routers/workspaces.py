@@ -123,24 +123,25 @@ def logout(request: Request, response: Response, user=Depends(current_user), ser
 @router.post('/workspaces', status_code=201)
 def create_workspace(payload: WorkspaceCreateRequest, user=Depends(current_user), service=Depends(get_workspaces)):
     workspace = service.create(user['user_id'], payload.title.strip())
-    return {'workspace': workspace.to_dict(service.config.workspace_idle_ttl_seconds)}
+    return {'workspace': workspace.to_dict(None if service.config.workspace_permanent or service.config.workspace_idle_ttl_seconds is None else service.config.workspace_idle_ttl_seconds)}
 
 
 @router.get('/workspaces')
 def list_workspaces(user=Depends(current_user), service=Depends(get_workspaces)):
-    return {'items': [w.to_dict(service.config.workspace_idle_ttl_seconds) for w in service.list(user['user_id'])]}
+    ttl = None if service.config.workspace_permanent or service.config.workspace_idle_ttl_seconds is None else service.config.workspace_idle_ttl_seconds
+    return {'items': [w.to_dict(ttl) for w in service.list(user['user_id'])]}
 
 
 @router.get('/workspaces/{workspace_id}')
 def get_workspace(workspace_id: UUID, user=Depends(current_user), service=Depends(get_workspaces)):
     workspace = service.get(str(workspace_id), user['user_id'])
-    return {'workspace': workspace.to_dict(service.config.workspace_idle_ttl_seconds)}
+    return {'workspace': workspace.to_dict(None if service.config.workspace_permanent or service.config.workspace_idle_ttl_seconds is None else service.config.workspace_idle_ttl_seconds)}
 
 
 @router.post('/workspaces/{workspace_id}/touch')
 def touch_workspace(workspace_id: UUID, user=Depends(current_user), service=Depends(get_workspaces)):
     workspace = service.get(str(workspace_id), user['user_id'], touch=True)
-    return {'workspace': workspace.to_dict(service.config.workspace_idle_ttl_seconds)}
+    return {'workspace': workspace.to_dict(None if service.config.workspace_permanent or service.config.workspace_idle_ttl_seconds is None else service.config.workspace_idle_ttl_seconds)}
 
 
 @router.get('/access-policy', response_model=AccessPolicyResponse)
@@ -234,6 +235,6 @@ def import_shared_workspace(
         idempotency_key=idempotency_key,
     )
     return {
-        'workspace': result.workspace.to_dict(sharing.workspace_idle_seconds),
+        'workspace': result.workspace.to_dict(None if sharing._config.workspace_permanent or sharing._config.workspace_idle_ttl_seconds is None else sharing.workspace_idle_seconds),
         'reused': result.reused,
     }

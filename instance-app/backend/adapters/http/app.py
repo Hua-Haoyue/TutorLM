@@ -87,6 +87,7 @@ def build_app(state: AppState) -> FastAPI:
     app.include_router(health.router)
     app.include_router(runtime.router)
     app.include_router(sessions.router)
+    app.include_router(sessions.internal_router)
     app.include_router(projects.router)
     app.include_router(documents.router)
     app.include_router(graph.router)

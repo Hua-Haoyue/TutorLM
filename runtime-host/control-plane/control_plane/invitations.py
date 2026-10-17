@@ -330,8 +330,8 @@ class InvitationService:
         """决定这次申请能不能入场，以及应当以什么优先级入场。
 
         * 提供了系统码：验证通过 -> 最高优先级；
-        * 提供了分享码：验证通过 -> 普通优先级（绝不提升）；
-        * 未提供码：只有当该项目已有普通 trial 授权且开关要求时才允许；
+        * 分享码仅用于复制，不能直接分配槽位；
+        * 未提供码：仅开放模式允许，历史 trial grant 不能绕过邀请模式；
         * 提供了格式合法但无效的码：**显式拒绝**，不能退化为无码入场。
         """
 
@@ -339,8 +339,6 @@ class InvitationService:
             code = None
         if code is None:
             if not self.policy.invitation_only:
-                return Admission(allowed=True, priority=DEFAULT_PRIORITY)
-            if workspace_id and user_id and self._store.has_trial_grant(workspace_id, user_id):
                 return Admission(allowed=True, priority=DEFAULT_PRIORITY)
             raise InvitationRequired("当前仅开放邀请码入场，请填写有效邀请码")
         raw = str(code).strip()
@@ -353,8 +351,8 @@ class InvitationService:
             )
         if SHARE_CODE_RE.match(raw):
             # 分享码**不能**直接申请计算资源（否则就变成直接挂载源项目的访问令牌）。
-            # 它只能走 ``/control/workspace-imports`` 产生独立副本；导入后的 trial
-            # grant 才允许无码普通租约。这里仍验证码本身的有效性，
+            # 它只能走 ``/control/workspace-imports`` 产生独立副本。
+            # 这里仍验证码本身的有效性，
             # 再拒绝，以便区分"码无效" 与 "码有效但不能直接用"。
             self.verify_share(raw)
             raise InvalidInvitation(

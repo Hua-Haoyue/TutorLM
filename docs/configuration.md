@@ -1,5 +1,9 @@
 # Control-plane configuration
 
+`inviteonly` is also accepted as a TOML spelling of `invitation_only`, alongside
+`invitationonly`. These are one setting, not independent switches. In gated mode
+share imports do not exempt later slot allocation from the invitation check.
+
 The control plane is configured by **defaults, then a TOML file, then
 `CONTROL_PLANE_*` environment variables, then explicit code-level overrides**.
 Later layers win. Environment variables stay authoritative, so existing

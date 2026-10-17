@@ -111,8 +111,7 @@ CONTROL_PLANE_DOCKER_IT=1 python -m pytest tests/test_docker_integration.py -v
 
 ## 尚待实现（不要当成已可用）
 
-- 容器内业务应用与完整工作台尚未实现；`instance-app/backend/` 仍为空目录。
-- 受信的应用会话交换：把租约绑定到实例内的应用会话，尚未实现，控制面不伪造应用身份。
+- 工作台位于 `instance-app/workbench/`，受控应用会话引导与分享集成遵守 `contracts/instance-runtime-v4.md`；部署时需同时交付控制面与应用端实现。
 - v3 需要应用镜像声明存储布局；未声明的镜像不能作为分享源，分享会返回 `share_source_unsupported`。
 - 实例状态探针（`generation`/活动任务数/drain 状态）：在应用补上
   `/internal/status` 之前，空闲回收使用保守探针（视为一直忙），

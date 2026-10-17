@@ -49,3 +49,10 @@ def bearer_token(authorization: str | None) -> str | None:
         return None
     value = parts[1].strip()
     return value or None
+
+
+def app_bootstrap_token(config, store, lease) -> str:
+    """Per-lease server-only credential, domain-separated from browser tokens."""
+    pepper = config.token_pepper.strip() or store.get_or_create_meta('token_pepper', generate_token(24))
+    identity = f'app-bootstrap:v1:{lease.lease_id}:{lease.slot_id}:{lease.generation}'
+    return hash_token(identity, pepper)
