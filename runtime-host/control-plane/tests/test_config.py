@@ -127,3 +127,13 @@ def test_workspace_retention_inf_is_permanent():
     config = ControlPlaneConfig.from_env({'CONTROL_PLANE_WORKSPACE_IDLE_TTL_SECONDS': 'inf'})
     assert config.workspace_idle_ttl_seconds is None
     assert config.describe()['workspace_idle_ttl_seconds'] is None
+
+
+def test_share_code_ttl_defaults_to_seven_days_and_is_configurable():
+    from control_plane.invitations import AccessPolicy
+    assert ControlPlaneConfig.from_env({}).share_code_ttl_seconds == 7 * 24 * 3600
+    config = ControlPlaneConfig.from_env({'CONTROL_PLANE_SHARE_CODE_TTL_SECONDS': '3600'})
+    assert config.share_code_ttl_seconds == 3600
+    assert AccessPolicy.from_config(config).share_ttl_seconds == 3600
+    with pytest.raises(ConfigError):
+        ControlPlaneConfig.from_env({'CONTROL_PLANE_SHARE_CODE_TTL_SECONDS': '0'})

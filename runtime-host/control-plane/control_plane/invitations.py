@@ -52,8 +52,8 @@ SYSTEM_PRIORITY = 100
 #: 普通访客（包括分享导入后的普通 trial）。
 DEFAULT_PRIORITY = 0
 
-#: 分享码默认有效期：4 小时。
-DEFAULT_SHARE_TTL_SECONDS = 4 * 60 * 60
+#: 分享码默认有效期：7 天（可用 CONTROL_PLANE_SHARE_CODE_TTL_SECONDS 调整）。
+DEFAULT_SHARE_TTL_SECONDS = 7 * 24 * 60 * 60
 
 #: 访客填写邀请码的请求字段上限。
 MAX_CODE_LENGTH = 128

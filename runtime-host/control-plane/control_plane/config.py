@@ -496,6 +496,8 @@ class ControlPlaneConfig:
     #: 运维预置的系统邀请码。必须由 CLI/本模块的生成器产生，格式严格校验；
     #: 不要手写弱字符串。``describe()`` 只暴露数量，绝不回显明文。
     system_invitation_codes: tuple[str, ...] = ()
+    #: 用户分享码的有效期（秒），默认 7 天。
+    share_code_ttl_seconds: int = 7 * 24 * 60 * 60
 
     # --- 对外 ---------------------------------------------------------------
     public_base_url: str = ""
@@ -576,6 +578,8 @@ class ControlPlaneConfig:
             raise ConfigError(
                 "CONTROL_PLANE_LEASE_COOKIE_MAX_AGE_SECONDS 必须 > 0（或留空跟随租约 TTL）"
             )
+        if self.share_code_ttl_seconds <= 0:
+            raise ConfigError("CONTROL_PLANE_SHARE_CODE_TTL_SECONDS 必须 > 0")
         if not isinstance(self.copy_helper_image, str):
             raise ConfigError("CONTROL_PLANE_COPY_HELPER_IMAGE 必须是字符串")
         self._validate_system_invitation_codes()
@@ -755,6 +759,7 @@ class ControlPlaneConfig:
             lease_cookie_max_age_seconds=layers.optional_int("LEASE_COOKIE_MAX_AGE_SECONDS", "lease_cookie_max_age_seconds", None),
             invitation_only=layers.boolean("INVITATION_ONLY", "invitation_only", False),
             system_invitation_codes=layers.invitation_codes(),
+            share_code_ttl_seconds=layers.int("SHARE_CODE_TTL_SECONDS", "share_code_ttl_seconds", 7 * 24 * 60 * 60),
             public_base_url=layers.string("PUBLIC_BASE_URL", "public_base_url", "").rstrip("/"),
             public_port=layers.int("PUBLIC_PORT", "public_port", 47823),
             instance_env=layers.instance_env(),
@@ -803,6 +808,7 @@ class ControlPlaneConfig:
             "admin_token_configured": self.is_admin_token_configured(),
             "invitation_only": self.invitation_only,
             "system_invitation_codes_count": len(self.system_invitation_codes),
+            "share_code_ttl_seconds": self.share_code_ttl_seconds,
             "copy_helper_image_configured": bool((self.copy_helper_image or "").strip()),
             "lease_cookie_name": self.lease_cookie_name,
             "lease_cookie_secure": self.lease_cookie_secure,

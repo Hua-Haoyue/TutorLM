@@ -339,8 +339,8 @@ def test_expired_share_code_cannot_be_imported(system):
     workspace = create_workspace(client)
     make_shareable(state, workspace)
     code = issue_share(client, workspace)
-    # 跳到 4 小时之后。
-    now = state.store._clock() + 4 * 3600 + 1
+    # 跳到 7 天之后。
+    now = state.store._clock() + 7 * 24 * 3600 + 1
     state.store._clock = lambda: now
     state.allocator._clock = lambda: now
 
@@ -350,6 +350,24 @@ def test_expired_share_code_cannot_be_imported(system):
         response = viewer.post("/control/workspace-imports", json={"invitation_code": code})
         assert response.status_code == 410
         assert response.json()["error"]["code"] == "invitation_expired"
+    finally:
+        viewer.close()
+
+
+def test_share_code_is_still_valid_after_six_days(system):
+    client, state, adapter = system
+    workspace = create_workspace(client)
+    make_shareable(state, workspace)
+    code = issue_share(client, workspace)
+    now = state.store._clock() + 6 * 24 * 3600
+    state.store._clock = lambda: now
+    state.allocator._clock = lambda: now
+
+    viewer = TestClient(client.app)
+    try:
+        viewer.post("/control/users")
+        response = viewer.post("/control/workspace-imports", json={"invitation_code": code})
+        assert response.status_code != 410, response.text
     finally:
         viewer.close()
 
