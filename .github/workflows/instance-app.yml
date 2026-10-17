@@ -48,4 +48,4 @@ jobs:
         working-directory: instance-app/frontend
         run: node --test tests/*.test.js
       - name: Workbench tests
-        run: node --test instance-app/workbench/scripts/test-access.cjs instance-app/workbench/scripts/test-workspace-view.cjs instance-app/workbench/scripts/test-markdown.cjs
+        run: node --test instance-app/workbench/scripts/test-access.cjs instance-app/workbench/scripts/test-workspace-view.cjs instance-app/workbench/scripts/test-markdown.cjs instance-app/workbench/scripts/test-explanation-preferences.cjs

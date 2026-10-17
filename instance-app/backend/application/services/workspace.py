@@ -71,7 +71,7 @@ class ExplanationService:
         self._observe = observe
         self._allow_generate = allow_generate
 
-    def explain(self, *, node_id, question=None, persist=False, response_mode='auto'):
+    def explain(self, *, node_id, question=None, persist=False, response_mode='auto', preferences=None):
         if not self._allow_generate:
             raise InvalidInputError('Plugin has no models.generate capability')
         if persist:
@@ -98,11 +98,13 @@ class ExplanationService:
         allow_diagnostic = response_mode == 'auto' and not any(e.learning.get('obstacle') for e in previous)
         context = build_context(self._app, node, nodes, self.list_for_node,
                                 LearningService(self._app).get_profile(),
-                                'auto' if allow_diagnostic else 'expand', resolved)
-        allow_diagnostic = allow_diagnostic and context['explanation_depth'] in (1, 2)
+                                'auto' if allow_diagnostic else 'expand', resolved, preferences)
+        allow_diagnostic = allow_diagnostic and context['explanation_policy']['allow_diagnostic']
         if not allow_diagnostic:
             context['response_mode'] = 'expand'
-        request = ExplanationRequest(node=node, question=question, learning_context=context)
+        language = context['explanation_preferences']['language']
+        request = ExplanationRequest(node=node, question=question,
+                                     language='zh' if language == 'auto' else language, learning_context=context)
         try:
             answer, obstacle = parse_answer(self._app.provider.explain(request), allow_diagnostic=allow_diagnostic)
         except ProviderError:
@@ -113,7 +115,8 @@ class ExplanationService:
                                          answer=answer, provider=capabilities.name, model=capabilities.model)
         explanation.learning = {'obstacle': obstacle, 'context': {
             key: context[key] for key in ('source_status', 'document_revision_id',
-                                         'explanation_depth', 'explanation_policy') if key in context}}
+                                         'explanation_depth', 'explanation_policy',
+                                         'explanation_preferences') if key in context}}
         if context.get('parent'):
             explanation.learning['context']['parent_explanation_id'] = context['parent']['explanation_id']
         return explanation

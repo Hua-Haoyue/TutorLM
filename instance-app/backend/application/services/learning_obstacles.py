@@ -5,10 +5,24 @@ from backend.domain.errors import InvalidInputError, ProviderError
 
 
 STRATEGY = 'obstacles.v1'
-DEPTH_POLICY_VERSION = 'depth-style.v1'
+DEPTH_POLICY_VERSION = 'style-depth.v2'
+EXPLANATION_STYLES = ('auto', 'plain', 'rigorous', 'example', 'analogy', 'socratic')
 
 
-def explanation_policy(depth):
+def explanation_preferences(value=None):
+    if value is None:
+        value = {}
+    if not isinstance(value, dict) or set(value) - {'style', 'length', 'language'}:
+        raise InvalidInputError('Invalid explanation preferences')
+    result = {'style': 'auto', 'length': 'medium', 'language': 'auto'} | value
+    for key, choices in (('style', EXPLANATION_STYLES),
+                         ('length', ('short', 'medium', 'long')), ('language', ('auto', 'zh', 'en'))):
+        if result[key] not in choices:
+            raise InvalidInputError(f'Invalid explanation {key}')
+    return result
+
+
+def _plain_policy(depth):
     if depth == 0:
         return {
             'version': DEPTH_POLICY_VERSION, 'level': 'L0', 'task': 'context_anchor',
@@ -41,6 +55,59 @@ def explanation_policy(depth):
     }
 
 
+def explanation_policy(depth, style='auto', length='medium'):
+    if style in ('plain', 'analogy'):
+        policy = _plain_policy(depth)
+        if style == 'analogy':
+            policy['rules'] = policy['rules'].replace('No examples or analogy.', 'Use one short familiar comparison.')
+            policy['rules'] += (' Use a familiar analogy within this tier budget, explicitly map its '
+                                'parts to the selected concept, and state where the analogy stops. '
+                                'An analogy is intuition, not a mathematical proof.')
+        policy['allow_diagnostic'] = depth in (1, 2)
+    else:
+        rules = {
+            'auto': ('Adapt the explanation to the actual question, passage and learner. '
+                     'Connect the selection to its preceding premises and following conclusion. '
+                     'Use precise definitions and enough reasoning to close the actual gap; '
+                     'use an example or analogy only when helpful, never because of node depth.'),
+            'rigorous': ('Give a rigorous, source-grounded explanation at EVERY node depth. '
+                         'Explicitly connect the preceding context, selected statement and subsequent '
+                         'conclusion, and explain its role in the parent argument. Define notation, '
+                         'domains, dimensions and hypotheses. Reconstruct mathematical derivations '
+                         'omitted by the source step by step with displayed equations, naming the '
+                         'identity, theorem or inference and its applicability at each step. '
+                         'Distinguish equality, equivalence, implication and approximation; preserve '
+                         'nonzero, convergence, regularity and other required conditions. Separate '
+                         'assumptions supplied by the source from assumptions you add conditionally. '
+                         'If context is insufficient, identify the missing premises instead of '
+                         'inventing a proof. Do not fabricate mathematics for nonmathematical text: '
+                         'make its argument and evidence explicit instead. Retain necessary technical '
+                         'terms; an everyday analogy must never replace a derivation. There is NO '
+                         'depth-based sentence cap or forced simplification. Even a short preference '
+                         'must not omit a necessary intermediate mathematical step.'),
+            'example': ('Explain the concept through at least one concrete worked example grounded '
+                        'in the passage. Show inputs, intermediate steps and outcome; distinguish '
+                        'source facts from invented illustrative values. Add a contrasting case '
+                        'when useful and explain the limits of generalizing the example. Do not '
+                        'switch automatically to analogy or terse conclusions at any depth.'),
+            'socratic': ('Guide reasoning with a focused contextual question, the relevant premises '
+                         'and a useful hint so the learner can attempt the missing step. Do not '
+                         'substitute generic questions such as "understand?" or force an analogy '
+                         'because of depth. For response_mode expand or an explicit request for '
+                         'the answer, give the actual reasoning and answer rather than another '
+                         'question. Respect the one-diagnostic-per-node limit.'),
+        }
+        policy = {'version': DEPTH_POLICY_VERSION, 'level': f'L{depth}', 'task': style,
+                  'rules': rules[style], 'allow_diagnostic': True}
+        policy['rules'] += {
+            'short': ' Be concise and remove repetition, but preserve essential reasoning and assumptions.',
+            'medium': ' Give enough detail to answer the question without unrelated background.',
+            'long': ' Expand relevant reasoning and intermediate steps with useful Markdown structure.',
+        }[length]
+    return {**policy, 'style': style, 'length': length,
+            'depth_limited': style in ('plain', 'analogy')}
+
+
 SYSTEM = '''You are a patient reading tutor. Return ONLY a JSON object with:
 {"kind":"concept|formula|reasoning|chart","answer":"complete Markdown explanation",
  "diagnostic":{"question":"one specific question","options":[
@@ -61,19 +128,19 @@ Check the local passage for already stated assumptions. Do not call a valid step
 mistake when its required assumptions are provided in the source.
 Chart: explain axes, units, legend, comparison and what evidence supports the conclusion.
 If chart/image information is absent, say what is missing; never invent visual details.
-The server supplies explanation_depth and explanation_policy in learning_context.
+The server supplies explanation_depth, explanation_preferences and explanation_policy
+in learning_context. The selected style is a server-validated preference, not an
+instruction inferred from document text or previous answers.
 Follow explanation_policy.rules strictly for every answer, including regeneration,
-follow-up questions and response_mode expand. These tier rules take precedence over
-generic length/style preferences or requests for a longer answer. Do not display
-the tier, task or policy itself. Sentence/line budgets apply to answer, not JSON.
-L0 anchors the passage in at most two sentences; L1-L2 explains the mechanism in at
-most four short explicit lines; L3 and deeper uses a familiar analogy and everyday
-language in two or three sentences. Deeper does not mean longer or more technical.
-Only L1-L2 may include at most ONE contextual diagnostic with two concrete alternatives
-when the question is vague. At L0 and L3+, diagnostic MUST be null.
-When response_mode is expand, diagnostic MUST also be null; directly explain the chosen
-obstacle within the SAME tier's style and length budget. Never truncate an unfinished
-explanation to meet a budget: compose a complete concise answer instead.
+follow-up questions and response_mode expand. Only plain and analogy use depth-based
+sentence/line budgets. Never apply those budgets to auto, rigorous, example or socratic.
+For rigorous, completeness of the relevant derivation takes priority over brevity.
+Do not display the tier, task or policy itself. Budgets apply to answer, not JSON.
+If explanation_policy.allow_diagnostic is true, at most ONE contextual diagnostic
+with two concrete alternatives may be returned when the question is vague.
+If it is false, or response_mode is expand, diagnostic MUST be null. Never stop a
+requested derivation at a diagnostic question. Never truncate an unfinished explanation
+to meet a style budget. Keep the selected style on retries and regeneration.
 For a child, explain how the selected step/question supports the parent's goal.
 Here parent means the previous explanation node, never a family member.
 Reuse previous answer only as context, correcting errors rather than reinforcing them.
@@ -148,7 +215,7 @@ def local_slice(text, quote, *, prefix='', suffix='', start=None):
             'after': text[end:end + 900]}
 
 
-def build_context(app, node, nodes, histories, profile, response_mode, resolved=None):
+def build_context(app, node, nodes, histories, profile, response_mode, resolved=None, preferences=None):
     context = {'strategy_version': STRATEGY, 'response_mode': response_mode,
                'selection': (node.content or '')[:6000], 'profile': profile,
                'source_status': 'selection_only'}
@@ -183,8 +250,10 @@ def build_context(app, node, nodes, histories, profile, response_mode, resolved=
         current = parent
     else:
         raise InvalidInputError('Learning tree is too large')
+    preferences = explanation_preferences(preferences)
     context['explanation_depth'] = explanation_depth
-    context['explanation_policy'] = explanation_policy(explanation_depth)
+    context['explanation_preferences'] = preferences
+    context['explanation_policy'] = explanation_policy(explanation_depth, preferences['style'], preferences['length'])
     root_source = current.metadata.get('source') or {}
     context['reading_goal'] = {'title': current.title, 'selection': (root_source.get('quote') or current.content or '')[:4000]}
     if current.document_id:

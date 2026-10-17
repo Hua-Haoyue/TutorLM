@@ -48,17 +48,17 @@ def _run(client, headers, wait, node, **extra):
 
 def test_diagnostic_once_and_parent_reference(client, session_headers, project_id, text_document, wait_for_run):
     node = _node(client, session_headers, project_id, text_document['id'])
-    first = _run(client, session_headers, wait_for_run, node, question='没看懂')
+    first = _run(client, session_headers, wait_for_run, node, question='没看懂', preferences={'style': 'plain'})
     assert first['state'] == 'completed', first
     exp = first['result']['explanation']
     assert exp['learning']['obstacle']['diagnostic'] is None
     child = _node(client, session_headers, project_id, text_document['id'], parent_id=node['id'],
                   metadata={'source': {'fromNode': node['id'], 'fromExp': exp['id'], 'quote': '正文内容'}})
-    result = _run(client, session_headers, wait_for_run, child)
+    result = _run(client, session_headers, wait_for_run, child, preferences={'style': 'plain'})
     assert result['state'] == 'completed', result
     assert result['result']['explanation']['learning']['context']['parent_explanation_id'] == exp['id']
     assert len(result['result']['explanation']['learning']['obstacle']['diagnostic']['options']) == 2
-    second = _run(client, session_headers, wait_for_run, child, question='没看懂')
+    second = _run(client, session_headers, wait_for_run, child, question='没看懂', preferences={'style': 'plain'})
     assert second['state'] == 'completed', second
     assert second['result']['explanation']['learning']['obstacle']['diagnostic'] is None
     history = client.get(f'/api/projects/{project_id}/explanations', headers=session_headers).json()['items']
@@ -111,7 +111,8 @@ def test_depth_policy_follows_ancestry_and_survives_expand(client, session_heade
             extra = ({'parent_id': parent['id']} if depth % 2 else
                      {'metadata': {'source': {'fromNode': parent['id'], 'quote': '正文内容'}}})
         node = _node(client, session_headers, project_id, text_document['id'], **extra)
-        result = _run(client, session_headers, wait_for_run, node, question='请详细回答，给出推导和专业术语')
+        result = _run(client, session_headers, wait_for_run, node, question='请详细回答，给出推导和专业术语',
+                      preferences={'style': 'plain'})
         assert result['state'] == 'completed', result
         context = captured[-1]
         assert context['explanation_depth'] == depth
@@ -120,7 +121,7 @@ def test_depth_policy_follows_ancestry_and_survives_expand(client, session_heade
         assert explanation['learning']['context']['explanation_depth'] == depth
         assert context['reading_goal']['title'] == '推导中的这一步'
         assert bool(explanation['learning']['obstacle']['diagnostic']) == (depth in (1, 2))
-        expanded = _run(client, session_headers, wait_for_run, node, response_mode='expand')
+        expanded = _run(client, session_headers, wait_for_run, node, response_mode='expand', preferences={'style': 'plain'})
         assert expanded['state'] == 'completed', expanded
         assert captured[-1]['explanation_policy'] == context['explanation_policy']
         assert captured[-1]['response_mode'] == 'expand'

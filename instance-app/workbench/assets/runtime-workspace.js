@@ -87,20 +87,36 @@
 
   /* ================= Preferences =================
      Browser-local (localStorage 'tlm.prefs'); applied instantly. Explanation
-     length / style / language are sent as a short hint appended to the
-     question, since the explanation workflow accepts only node_id + question. */
+     length / style / language use validated workflow fields when available;
+     older backends still receive the legacy question hint. */
   const PREF_KEY = 'tlm.prefs';
   const PREF_DEFAULT = { hl: '#F2D58A', follow: true, links: true, minimap: true, length: 'medium', style: 'auto', lang: 'auto', readFont: 'serif', pen: 'pen', inkColor: '#C2402F' };
   const HL_COLORS = [['#F2D58A', '麦黄'], ['#F5B48C', '杏色'], ['#A8D5B5', '薄荷'], ['#A9C8EC', '天蓝'], ['#E8A9C3', '玫瑰'], ['#C8B6EA', '薰衣草']];
   const prefs = { ...PREF_DEFAULT, ...readJSON(PREF_KEY, {}) };
   const LENGTH_HINT = { short: '请用三句话以内简短回答', medium: '', long: '请详细回答，分点说明，并给出推导或例子' };
-  const STYLE_HINT = { auto: '', plain: '用通俗易懂的语言', rigorous: '用严谨准确的学术表述', example: '多举具体例子', analogy: '用生活中的类比帮助理解', socratic: '用引导式提问帮我自己想明白' };
+  const STYLE_HINT = { auto: '', plain: '用通俗易懂的语言', rigorous: '严格说明上下文的逻辑关系、假设条件，并逐步补全原文省略的数学推导', example: '用具体例子展示输入、过程和结果', analogy: '用生活中的类比帮助理解并说明类比的边界', socratic: '用有针对性的问题和提示引导思考，明确要求答案时给出完整解释' };
   const LANG_HINT = { auto: '', zh: '请用中文回答', en: 'Answer in English' };
   function withStyle(question) {
     const hint = [LENGTH_HINT[prefs.length], STYLE_HINT[prefs.style], LANG_HINT[prefs.lang]].filter(Boolean).join('；');
     const base = String(question || '').trim();
     if (!hint) return base.slice(0, 1000);
     return `${(base || '请解释这个知识点。').slice(0, 1000 - hint.length - 4)}\n（${hint}）`;
+  }
+  function explanationInput(nodeId, question, responseMode) {
+    const workflow = (api.runtime?.plugins || []).flatMap(plugin => plugin.workflows || [])
+      .find(workflow => workflow.kind === 'explanation');
+    const fields = workflow?.input_schema?.properties || {};
+    const q = fields.preferences ? String(question || '').trim().slice(0, 1000) : withStyle(question);
+    return {
+      node_id: nodeId,
+      ...(fields.response_mode ? { response_mode: responseMode } : {}),
+      ...(q ? { question: q } : {}),
+      ...(fields.preferences ? { preferences: {
+        style: Object.hasOwn(STYLE_HINT, prefs.style) ? prefs.style : 'auto',
+        length: Object.hasOwn(LENGTH_HINT, prefs.length) ? prefs.length : 'medium',
+        language: Object.hasOwn(LANG_HINT, prefs.lang) ? prefs.lang : 'auto',
+      } } : {}),
+    };
   }
   function applyPrefs() {
     const root = document.documentElement;
@@ -137,7 +153,6 @@
           <div class="pref-row"><span>长度</span>${opt('length', [['short', '简短'], ['medium', '适中'], ['long', '详细']], prefs.length)}</div>
           <div class="pref-row"><span>风格</span>${opt('style', [['auto', '默认'], ['plain', '通俗'], ['rigorous', '严谨'], ['example', '多举例'], ['analogy', '类比'], ['socratic', '引导式']], prefs.style)}</div>
           <div class="pref-row"><span>语言</span>${opt('lang', [['auto', '跟随原文'], ['zh', '中文'], ['en', 'English']], prefs.lang)}</div>
-          <div class="pref-row"><span></span><span class="hint">以提示的形式附加在提问后面，对新生成的解释和对话生效。</span></div>
         </section>
         <section><h3>知识图</h3>
           <div class="pref-row"><span>跟随文档滚动</span>${sw('follow', '跟随文档滚动')}</div>
@@ -1574,10 +1589,7 @@
   async function explain(node, question, { page = true, responseMode = 'auto' } = {}) {
     if (!S.kinds.has('explanation')) throw new Error('当前镜像未启用解释工作流');
     if (running(node.id)) throw new Error('这个节点正在生成，请稍候');
-    const q = withStyle(question);
-    const supportsMode = (api.runtime?.plugins || []).some((plugin) => (plugin.workflows || [])
-      .some((workflow) => workflow.kind === 'explanation' && workflow.input_schema?.properties?.response_mode));
-    const input = { node_id: node.id, ...(supportsMode ? { response_mode: responseMode } : {}), ...(q ? { question: q } : {}) };
+    const input = explanationInput(node.id, question, responseMode);
     if (!page) { S.pendingChat[node.id] = question; renderNode(node.id); }
     let runId = null;
     try {
