@@ -95,7 +95,7 @@ async function main() {
     await wait(page, () => window.TLM_WS?.state.connected && window.TLM_WS.state.nodes.length);
     await page.waitForLoadState('networkidle');
     await page.evaluate((id) => window.TLM_WS.select(id), parentId);
-    await page.click(`.gnode[data-id="${parentId}"] [data-act="node-retell"]`);
+    await page.click(`.gnode[data-id="${parentId}"] [data-act="node-optimize"]`);
     // First retelling asks for the learner profile (PUT /api/learning/profile).
     if (await page.waitForSelector('#lp-stage', { timeout: 5000 }).then(() => true, () => false)) await page.click('.modal__foot .btn--primary');
     await wait(page, (id) => (window.TLM_WS.state.history[id] || []).length >= 2, parentId);

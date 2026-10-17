@@ -21,6 +21,7 @@ INPUT_SCHEMA = {
                 "language": {"type": "string", "enum": ["auto", "zh", "en"]},
             },
         },
+        "purpose": {"type": "string", "enum": ["explain", "optimize"]},
     },
 }
 
@@ -36,6 +37,10 @@ class ExplanationWorkflow:
             response_mode=data.get("response_mode", "auto"),
             preferences=data.get("preferences"),
         )
+        if data.get('purpose') == 'optimize':
+            node = context.capability('knowledge.read').nodes.get(data.get('node_id'))
+            if node and not node.parent_id:
+                entity.learning['feynman_eligible'] = True
         checkpoint(context)
         return Draft(
             entity=entity, result=entity.to_dict(), provider=entity.provider,

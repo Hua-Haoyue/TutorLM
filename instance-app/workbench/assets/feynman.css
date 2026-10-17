@@ -1,0 +1,17 @@
+.feynman-entry { padding: 8px 12px 4px; }
+.feynman { margin: 12px; padding: 14px 0 4px; border-top: 1px solid var(--line-soft); font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
+.feynman-heading { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.feynman-heading .ic { flex: 0 0 16px; }
+.feynman-statement { margin: 10px 0 12px; }
+.feynman-choices { display: grid; gap: 8px; }
+.feynman-choices button { width: 100%; min-height: 40px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); color: var(--ink); font: inherit; text-align: left; white-space: normal; overflow-wrap: anywhere; line-height: 1.55; cursor: pointer; }
+.feynman-choices button:hover:not(:disabled) { border-color: var(--ink); background: var(--bg); }
+.feynman-choices button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.feynman-choices button:disabled { opacity: .6; cursor: wait; }
+.feynman-feedback { margin: 0 0 14px; padding-left: 10px; border-left: 2px solid #a56a23; }
+.feynman-feedback p { margin: 6px 0; }
+.feynman-feedback blockquote { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+.feynman-status { margin: 10px 0 0; color: var(--muted); }
+.feynman-error { color: #ac3d3d; margin: 8px 0; }
+.feynman--passed .feynman-heading { color: #287866; }
+.feynman--passed p { margin-bottom: 0; }

@@ -33,6 +33,9 @@ UNDO_SECONDS = 24 * 60 * 60
 
 
 def _ensure_table(conn: Any) -> None:
+    # Feynman checks are snapshotted with their cards; the table is created lazily.
+    from backend.application.services.feynman import ensure_table as ensure_feynman_table
+    ensure_feynman_table(conn)
     conn.execute("""CREATE TABLE IF NOT EXISTS card_clear_undo (
         token TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,
@@ -133,6 +136,8 @@ def _delete_cards(state: AppState, document_id: str, card_ids: list[str] | None)
                                   "(SELECT id FROM card_clear_selected_ids)", ()),
             "learning": _rows(conn, "SELECT * FROM node_learning WHERE node_id IN "
                               "(SELECT id FROM card_clear_selected_ids)", ()),
+            "feynman_checks": _rows(conn, "SELECT * FROM feynman_checks WHERE node_id IN "
+                                    "(SELECT id FROM card_clear_selected_ids)", ()),
             "reparented_children": children,
         }
         token = str(uuid.uuid4())
@@ -218,6 +223,7 @@ def undo_clear(state: AppState, token: str) -> dict[str, Any]:
         _insert_rows(conn, "nodes", snapshot["nodes"])
         _insert_rows(conn, "edges", snapshot["edges"])
         _insert_rows(conn, "explanations", snapshot["explanations"])
+        _insert_rows(conn, "feynman_checks", snapshot.get("feynman_checks", []))
         _insert_rows(conn, "node_learning", snapshot["learning"])
         for child in children:
             if "metadata_json" in child:

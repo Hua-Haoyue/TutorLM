@@ -1004,6 +1004,7 @@
     layoutBusy = true;
     if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); }
     try {
+      const beforeLayout = await layoutPlugin?.beforeAutoLayout(pool);
       const target = computeLayout(true);
       const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
       world.classList.toggle('animate', !reduced);
@@ -1034,6 +1035,7 @@
       if (beforeLayout && current()) layoutPlugin.afterAutoLayout(beforeLayout, pool);
       if (!silent && current()) toast('已从根到叶排列并保存布局');
     } finally {
+      layoutPlugin?.endAutoLayout();
       world.classList.remove('animate'); layoutBusy = false;
       if (button) { button.disabled = false; button.removeAttribute('aria-busy'); }
       layoutPlugin?.endAutoLayout();
@@ -1298,18 +1300,21 @@
     const hist = S.history[n.id] || [];
     const ids = meta(n).pages;
     if (Array.isArray(ids)) return ids.map((id) => hist.find((h) => h.id === id)).filter(Boolean);
-    const oldest = [...hist].sort(byTime)[0];
+    const oldest = [...hist].reverse().sort(byTime)[0];
     return oldest ? [oldest] : [];
   }
   function chatOf(n) {
     const pg = new Set(pagesOf(n).map((h) => h.id));
-    return (S.history[n.id] || []).filter((h) => !pg.has(h.id)).sort(byTime);
+    return (S.history[n.id] || []).filter((h) => !pg.has(h.id)).reverse().sort(byTime);
   }
   function pageIndex(n) {
     const len = pagesOf(n).length, i = meta(n).page;
     return len ? Math.min(len - 1, Math.max(0, Number.isInteger(i) ? i : len - 1)) : -1;
   }
   function latestExplanation(n) {
+    // Explanation versions are the node's pages; chat replies are not pages and
+    // never replace the shown explanation.
+    if (Array.isArray(meta(n).pages) && meta(n).pages.length) return pagesOf(n)[pageIndex(n)] || null;
     // History comes from the server in created_at DESC, rowid DESC order.
     // Stable sorting preserves that explicit record order for equal timestamps.
     return [...(S.history[n.id] || [])].filter((e) => typeof e.answer === 'string' && e.answer.trim())
@@ -1359,13 +1364,63 @@
     return { full: text, brief: clip(collapse(brief), 120) };
   }
 
-  function diagnosticHtml(n, exp, run) {
-    const diagnostic = exp?.learning?.obstacle?.diagnostic;
-    if (!diagnostic || !Array.isArray(diagnostic.options)) return '';
-    return `<div class="obstacle-check"><p>${esc(diagnostic.question)}</p><div class="obstacle-choices">
-      ${diagnostic.options.map((o, i) => `<button class="btn btn--sm" data-diagnostic="${i}" ${run ? 'disabled' : ''}>${esc(o.label)}</button>`).join('')}
-      <button class="btn btn--sm" data-diagnostic="expand" ${run ? 'disabled' : ''}>${icon('arrow-r')}直接展开</button>
-      </div></div>`;
+  /* Feynman checks are opened explicitly and belong to one optimized root version. */
+  const feynmanStates = new Map();
+  const optimizingNodes = new Set();
+  const feynmanKey = (n, exp) => `${S.project.id}:${n.id}:${exp.id}`;
+  const feynmanEligible = (n, exp) => !n.parent_id && !!(exp?.learning?.feynman_eligible === true || exp?.learning?.retelling);
+  function feynmanHtml(n, exp, run) {
+    if (!feynmanEligible(n, exp)) return '';
+    const state = feynmanStates.get(feynmanKey(n, exp));
+    if (!state) return `<div class="feynman-entry"><button class="btn btn--sm" data-act="node-feynman" ${run ? 'disabled' : ''}>${icon('check')}费曼验证</button></div>`;
+    const q = state.quiz, busy = state.busy;
+    const feedback = state.feedback ? `<div class="feynman-feedback" role="status"><strong>刚才的逻辑需要这样理解</strong><p>${esc(state.feedback.correction)}</p><blockquote>${esc(state.feedback.source_quote)}</blockquote></div>` : '';
+    if (q?.state === 'correct') return `<section class="feynman feynman--passed" aria-label="费曼验证"><div class="feynman-heading">${icon('check')}识破了这个逻辑误区</div><p>${esc(q.correction)}</p></section>`;
+    const question = q?.state === 'pending' ? `<div class="feynman-heading">${icon('comment')}笨学生 AI 向你确认</div><p class="feynman-statement">${esc(q.statement)}</p><div class="feynman-choices">${q.choices.map(c => `<button type="button" data-feynman-choice="${esc(c.id)}" ${busy || run ? 'disabled' : ''}>${esc(c.label)}</button>`).join('')}</div>` : '';
+    return `<section class="feynman" aria-label="费曼验证" aria-busy="${!!busy}">${feedback}${question}
+      ${busy ? `<p class="feynman-status" role="status">${state.phase === 'grading' ? '正在确认你的选择…' : state.feedback ? '正在换一道题…' : '正在准备验证题…'}</p>` : ''}
+      ${state.error ? `<p class="feynman-error" role="alert">${esc(state.error)}</p><button class="btn btn--sm" data-act="node-feynman">${icon('redo')}重试</button>` : ''}
+      </section>`;
+  }
+  async function startFeynman(n, exp = currentPage(n)) {
+    if (!feynmanEligible(n, exp) || running(n.id) || optimizingNodes.has(n.id)) return;
+    const key = feynmanKey(n, exp), previous = feynmanStates.get(key);
+    if (previous?.busy) return;
+    const state = { ...previous, busy: true, phase: 'generating', error: null };
+    feynmanStates.set(key, state); renderNode(n.id);
+    try {
+      const current = await api.get(`/api/nodes/${p(n.id)}/feynman?explanation_id=${p(exp.id)}`);
+      if (current.previous_feedback) state.feedback = current.previous_feedback;
+      if (current.quiz && current.quiz.state !== 'incorrect') { state.quiz = current.quiz; return; }
+      if (current.quiz) state.feedback = current.quiz;
+      const input = { node_id: n.id, explanation_id: exp.id, ...(current.quiz ? { previous_id: current.quiz.id } : {}) };
+      const result = await api.run('feynman', input);
+      state.quiz = result.quiz;
+    } catch (e) {
+      state.error = e.message || '验证题暂时未能生成，请重试';
+    } finally {
+      state.busy = false;
+      if (nodeOf(n.id)) renderNode(n.id);
+    }
+  }
+  async function answerFeynman(n, optionId) {
+    const exp = currentPage(n);
+    if (!feynmanEligible(n, exp) || running(n.id) || optimizingNodes.has(n.id)) return;
+    const state = feynmanStates.get(feynmanKey(n, exp));
+    if (!state || state.busy || state.quiz?.state !== 'pending') return;
+    state.busy = true; state.phase = 'grading'; state.error = null; renderNode(n.id);
+    try {
+      const result = await api.post(`/api/nodes/${p(n.id)}/feynman/${p(state.quiz.id)}/answer`, { option_id: optionId });
+      state.quiz = result.quiz;
+      if (result.quiz.state === 'incorrect') state.feedback = result.quiz;
+    } catch (e) {
+      state.error = e.message || '作答未能保存，请重试';
+      return;
+    } finally {
+      state.busy = false;
+      if (nodeOf(n.id)) renderNode(n.id);
+    }
+    if (state.quiz.state === 'incorrect') await startFeynman(n, exp);
   }
 
   /* Answer HTML with the user's marks (bold / italic / highlight) and the words
@@ -1410,15 +1465,14 @@
         <span>${pi + 1} / ${pages.length}</span>
         <button class="icon-btn" data-act="page-next" ${pi >= pages.length - 1 ? 'disabled' : ''} aria-label="下一版">${icon('chev-r')}</button></span>` : '';
     const kids = childrenOf(n.id).length;
-    const retell = S.kinds.has('retelling') && page && kids ? `<button class="btn btn--sm" data-act="node-retell" ${run ? 'disabled' : ''}
-        title="结合 ${kids} 个子节点优化当前解释">${icon('narrate')}优化解释</button>` : '';
+    const canRetell = S.kinds.has('retelling') && page && kids;
     const versions = retellingVersions(n);
     const showingOriginal = versions && page?.id === versions.original.id;
     const versionSwitch = versions ? `<button class="btn btn--sm" data-act="retelling-toggle" ${run ? 'disabled' : ''}
         title="${showingOriginal ? '切换到优化后的新解释' : '切换到原解释'}" aria-pressed="${!!showingOriginal}">
         ${icon(showingOriginal ? 'arrow-r' : 'arrow-l')}${showingOriginal ? '查看新解释' : '查看原解释'}</button>` : '';
     const pageBody = page
-      ? `<div class="xpl__body"><div class="answer" data-answer-node="${esc(n.id)}" data-exp="${esc(page.id)}">${answerHtml(n, page)}</div></div>${diagnosticHtml(n, page, run)}`
+      ? `<div class="xpl__body"><div class="answer" data-answer-node="${esc(n.id)}" data-exp="${esc(page.id)}">${answerHtml(n, page)}</div></div>`
       : `<div class="xpl__empty"><span>${canExplain ? '还没有解释。' : '当前镜像未启用解释工作流。'}</span>${canExplain ? `<button class="btn btn--sm btn--primary" data-act="node-explain" ${run ? 'disabled' : ''}>${icon('sparkle')}生成解释</button>` : ''}</div>`;
     return `<div class="gnode sel ${m.status === 'mastered' ? 'mastered' : ''}" ${attrs} role="group" aria-label="知识节点：${esc(n.title)}">
       <div class="gnode__head">
@@ -1437,10 +1491,13 @@
           ${pageBody}
           ${page || m.source?.fromNode ? `<div class="node-learning-actions">
             ${page && canExplain ? `<button class="btn btn--sm" data-act="node-explain" title="重新生成解释" ${run ? 'disabled' : ''}>${icon('sparkle')}重新生成</button>` : ''}
-            ${retell}${versionSwitch}${m.source?.fromNode ? '<button class="btn btn--sm" data-act="node-parent">↑ 返回上层</button>' : ''}
+            ${page && canExplain ? `<button class="btn btn--sm" data-act="node-optimize" ${run || optimizingNodes.has(n.id) ? 'disabled' : ''}>${icon(canRetell ? 'narrate' : 'sparkle')}优化解释</button>` : ''}
+            ${versionSwitch}${m.source?.fromNode ? '<button class="btn btn--sm" data-act="node-parent">↑ 返回上层</button>' : ''}
           </div>` : ''}
+          ${feynmanHtml(n, page, run || optimizingNodes.has(n.id))}
         </div>
         ${canExplain ? `<div class="chat">
+          <div class="chat__log" role="log" aria-label="节点对话" aria-live="polite">${chat.map(exp => `<div class="bubble bubble--q">${esc(shownQuestion(exp.question))}</div><div class="bubble bubble--a answer" data-answer-node="${esc(n.id)}" data-exp="${esc(exp.id)}">${answerHtml(n, exp)}</div>`).join('')}${S.pendingChat[n.id] ? `<div class="bubble bubble--q">${esc(S.pendingChat[n.id])}</div><div class="bubble bubble--a bubble--wait" role="status">正在回答…</div>` : ''}${S.chatErrors?.[n.id] ? `<div class="bubble bubble--q">${esc(S.chatErrors[n.id].question)}</div><div class="bubble bubble--a" role="alert">回复未完成：${esc(S.chatErrors[n.id].message)}。请重新发送。</div>` : ''}</div>
           <div class="explanation-depth" role="group" aria-label="解释深度">${[['auto', '自动'], ['black_box', '知道用途'], ['mechanism', '机制拆解']].map(([value, label]) => `<button type="button" data-depth="${value}" aria-pressed="${(m.explanation_depth || 'auto') === value}" ${run ? 'disabled' : ''}>${label}</button>`).join('')}</div>
           <form class="chat__form" data-chat><input class="input" name="q" maxlength="900" placeholder="继续问这个节点…" aria-label="向节点提问" autocomplete="off" ${run ? 'disabled' : ''}>
             <button class="btn btn--primary" type="submit" aria-label="发送" ${run ? 'disabled' : ''}>${icon('send')}</button></form>
@@ -1655,14 +1712,9 @@
     const act = e.target.closest('[data-act]')?.dataset.act;
     const depth = e.target.closest('[data-depth]')?.dataset.depth;
     if (depth && !running(n.id)) { await patchMeta(n, { explanation_depth: depth }); renderNode(n.id); return; }
-    const choice = e.target.closest('[data-diagnostic]')?.dataset.diagnostic;
-    if (choice !== undefined) {
-      const exp = currentPage(n), diagnostic = exp?.learning?.obstacle?.diagnostic;
-      if (!diagnostic || running(n.id)) return;
-      const question = choice === 'expand' ? '请直接展开完整解释，补全必要步骤和适用条件，不再提诊断问题。' : diagnostic.options[Number(choice)]?.question;
-      if (question) await explain(n, question, { responseMode: 'expand' });
-      return;
-    }
+    const choice = e.target.closest('[data-feynman-choice]')?.dataset.feynmanChoice;
+    if (choice !== undefined) { await answerFeynman(n, choice); return; }
+    if (act === 'node-feynman') { await startFeynman(n); return; }
     if (act === 'node-parent') { selectNode(meta(n).source?.fromNode, { center: true }); return; }
     if (act === 'node-delete') await deleteNode(n.id);
     if (act === 'node-collapse') selectNode(null);
@@ -1695,7 +1747,13 @@
     const n = nodeOf(form.closest('.gnode').dataset.id), q = form.q.value.trim();
     if (!q) { form.q.focus(); return; }
     form.q.value = '';
-    await explain(n, q, { page: false });
+    try {
+      await explain(n, q, { page: false });
+    } catch (e) {
+      const input = elOf(n)?.querySelector('[data-chat] input');
+      if (input && !input.value) input.value = q;
+      throw e;
+    }
     elOf(n)?.querySelector('[data-chat] input')?.focus();
   }));
 
@@ -1822,11 +1880,15 @@
     }
   }
   /* page=true → a new explanation version (pager); page=false → a chat turn. */
-  async function explain(node, question, { page = true, responseMode = 'auto' } = {}) {
+  async function explain(node, question, { page = true, responseMode = 'expand', purpose = 'explain' } = {}) {
     if (!S.kinds.has('explanation')) throw new Error('当前镜像未启用解释工作流');
     if (running(node.id)) throw new Error('这个节点正在生成，请稍候');
     const input = explanationInput(node.id, question, responseMode);
-    if (!page) { S.pendingChat[node.id] = question; renderNode(node.id); }
+    if (purpose === 'optimize') input.purpose = purpose;
+    if (!page) {
+      S.chatErrors ||= {}; delete S.chatErrors[node.id];
+      S.pendingChat[node.id] = question; renderNode(node.id);
+    }
     let runId = null;
     try {
       const result = await api.run('explanation', input, { onRun: (r) => {
@@ -1835,7 +1897,10 @@
       } });
       delete S.pendingChat[node.id];
       await addExplanation(node, result.explanation, page);
-      toast('已更新解释');
+      if (purpose !== 'optimize') toast('已更新解释');
+    } catch (e) {
+      if (!page) S.chatErrors[node.id] = { question, message: e.message || '暂时无法生成' };
+      throw e;
     } finally {
       delete S.pendingChat[node.id];
       if (runId) markPageRun(runId, false);
@@ -1867,8 +1932,16 @@
     return clip('请结合我圈出的疑点，并把下面这些更深层的解释融合进来，重新完整地解释一遍，让我不需要再追问：\n' + lines.join('\n'), 860);
   }
   async function optimize(n) {
-    if (!explChildren(n).length) { toast('先在解释里圈词并追问，生成更深的解释后再优化'); return; }
-    await explain(n, optimizePrompt(n), { page: true });
+    if (optimizingNodes.has(n.id)) return;
+    if (!currentPage(n)) { toast('请先生成解释'); return; }
+    optimizingNodes.add(n.id); renderNode(n.id);
+    try {
+      if (childrenOf(n.id).length && S.kinds.has('retelling')) await retell(n);
+      else await explain(n, optimizePrompt(n), { page: true, responseMode: 'expand', purpose: 'optimize' });
+    } finally {
+      optimizingNodes.delete(n.id);
+      if (nodeOf(n.id)) renderNode(n.id);
+    }
   }
   /* 回讲 (retelling): the server folds the explained direct children back into
      this parent and stores the result as a new explanation version. It needs a
@@ -1974,7 +2047,7 @@
         return;
       }
       await addExplanation(n, result.explanation, true);
-      toast(result.status === 'partial' ? `解释已优化（${new Set([...(result.blocked_child_ids || []), ...(result.unresolved_descendant_ids || [])]).size} 个分支节点尚未解释）` : '解释已优化');
+      if (result.status === 'partial') toast(`已优化部分解释（${new Set([...(result.blocked_child_ids || []), ...(result.unresolved_descendant_ids || [])]).size} 个分支节点尚未解释）`);
     } finally {
       if (runId) markPageRun(runId, false);
       paintState();

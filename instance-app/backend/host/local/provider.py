@@ -75,6 +75,15 @@ class FakeProvider:
             'analogy_core': '', 'terms': list(dict.fromkeys(re.findall(r'\*\*([^*\n]+)\*\*', item['source_text'])))}}
             for item in request.items]}, ensure_ascii=False)
 
+    def feynman(self, payload):
+        attempt = len(payload.get('previous_statements', [])) + 1
+        return json.dumps({
+            'statement': f'第{attempt}次确认：所以这里的前提和结论可以反过来理解，对吗？',
+            'choices': ['前提与结论有方向，不能直接反过来', '可以，反过来也成立'],
+            'correct_index': 0, 'correction': '前提与结论有明确方向，不能由结论倒推前提。',
+            'source_quote': payload['source'][:80], 'flaw': '把推理方向颠倒了',
+        }, ensure_ascii=False)
+
     def close(self):
         pass
 
@@ -161,6 +170,14 @@ class OpenAIProvider:
         from backend.application.services.causal_rewriting import EXTRACTION_SYSTEM
         return self._generate('causal_extraction', json.dumps(asdict(request), ensure_ascii=False),
                               EXTRACTION_SYSTEM, json_object=True)
+
+    def feynman(self, payload):
+        from backend.application.services.feynman import OUTPUT_SCHEMA, SYSTEM
+        return self._provider.generate(GenerateRequest(
+            kind='feynman', prompt=json.dumps(payload, ensure_ascii=False), system=SYSTEM,
+            max_tokens=max(self.max_tokens, 2048), timeout_seconds=self.timeout_seconds,
+            json_object=True, json_schema=OUTPUT_SCHEMA,
+        )).text
 
     def close(self):
         self._provider.close()

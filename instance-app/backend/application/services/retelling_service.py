@@ -238,6 +238,8 @@ def run(context, node_id: str) -> Draft:
                                           'child_explanation_ids': [entries[key]['explanation']['id'] for key in ready_ids],
                                           'skipped_child_ids': blocked_ids,
                                           'bridges': parsed['bridges'], 'style_warnings': warnings}}
+    if not parent['node'].get('parent_id'):
+        explanation.learning['feynman_eligible'] = True
     return Draft(entity=explanation, result={**base, 'explanation': explanation.to_dict()},
                  provider=provider.name, model=provider.model, artifact_type='explanation',
                  precommit=validate)
