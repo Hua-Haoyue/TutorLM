@@ -322,7 +322,7 @@ class AppServices:
         return result
 
     def narration_public(self, row: Mapping[str, Any]) -> dict[str, Any]:
-        segments = _json_or(row.get("segments"), [])
+        segments = _json_or(row.get("segments", row.get("segments_json")), [])
         return {
             "id": row["id"],
             "title": row["title"],
