@@ -206,6 +206,7 @@ scripts/               本地启动与模块边界检查
 | `explanations` | `explanation.v1` | 基于节点和有效来源生成解释草稿并保存历史 |
 | `knowledge-narration` | `narration.v1` | 按选定节点顺序生成串讲段落及派生时长 |
 | `knowledge-narration` | `retelling.v1` | 将已解释子节点回讲到父节点，返回 blocked/partial/complete 状态 |
+| `card-clear` | 无模型工作流 | 清除当前文档或框选卡片，并提供服务端撤销快照 |
 
 - 学习资料与节点学习状态可持久化，写入带 revision，陈旧写入返回冲突。
 - 回讲要求已设置学习资料、父节点已有解释，并根据子节点解释的可用情况决定结果。

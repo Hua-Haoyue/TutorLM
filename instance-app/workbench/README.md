@@ -13,6 +13,29 @@ invitation entry and lease lifecycle modules; it is not the workbench page.
 - `scripts/dev-server.py`: same-origin static server and local API proxy.
 - `scripts/browser-smoke.cjs`: browser integration test using a disposable backend.
 
+## Card layout and deletion
+
+The canvas keeps its existing drag and automatic layout. New cards store their
+initial position in `metadata.layout_default` at creation. The toolbar adds
+restore-default and undo controls; Shift-click on restore affects only the
+selected card. The selected card can switch between the workbench's normal
+360px width and a 420px enlarged view. Its contents scale with the card and
+the source connector follows the transition. Layout changes are stored through
+the existing node metadata API with revision checks; the 20-action undo stack
+is local to the current browser tab. For legacy cards without a saved default,
+the first position observed in that tab becomes the default on the first edit.
+
+The distinct red dashed **框选删除** control enters rectangle mode. Releasing a
+box immediately deletes cards fully inside it; clicking the control again
+before drawing or pressing Escape returns to the normal pointer. **清除当前文档**
+uses a confirmation dialog. Single-card deletion uses the same snapshot API
+when the plugin is enabled. All three operations include a five-second undo toast
+and share the canvas undo history. The `card-clear` backend plugin keeps the
+deleted cards, explanations, learning state and edges in one 24-hour undo
+snapshot. Surviving descendants point to their nearest surviving ancestor in
+both the graph and explanation context. The controls appear only when the
+backend advertises the enabled plugin.
+
 ## Local Development
 
 Start the backend from the repository root:

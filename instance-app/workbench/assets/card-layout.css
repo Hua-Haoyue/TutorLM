@@ -1,0 +1,19 @@
+/* The workbench owns the normal 360px width in frame.css. */
+.gnode.sel[data-card-scale="large"] {
+  width: 420px;
+  max-height: min(690px, 70dvh);
+}
+.gnode.sel {
+  transition: width 260ms ease-out, max-height 260ms ease-out;
+}
+.gnode.sel > .gnode__head,
+.gnode.sel > .gnode__scroll { transition: zoom 260ms ease-out; }
+.gnode.sel[data-card-scale="large"] > .gnode__head,
+.gnode.sel[data-card-scale="large"] > .gnode__scroll {
+  zoom: 1.16;
+}
+.gnode.sel [data-card-layout="zoom"] { font: 600 16px/1 var(--sans); }
+#card-layout-undo:disabled { opacity: .35; cursor: default; }
+@media (max-width: 700px) {
+  .gnode.sel[data-card-scale="large"] { width: min(420px, calc(100vw - 40px)); max-height: 70dvh; }
+}

@@ -41,6 +41,7 @@ BUILTIN_PLUGINS: tuple[tuple[str, str], ...] = (
     ("backend.plugins.documents", "build"),
     ("backend.plugins.explanations", "build"),
     ("backend.plugins.knowledge_narration", "build"),
+    ("backend.plugins.card_clear", "build"),
 )
 
 
@@ -126,7 +127,7 @@ class PluginRegistry:
         return item
 
     def register_builtins(self) -> "PluginRegistry":
-        """Load and register the three mandatory builtin plugins.
+        """Load and register the mandatory builtin plugins.
 
         A failing import or a missing :data:`MANIFEST` is fatal: builtins are
         required plugins, so startup/readiness must surface the failure instead

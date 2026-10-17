@@ -821,6 +821,10 @@
   }
   const surfaceCenter = () => [surface.clientWidth / 2, surface.clientHeight / 2];
   const posOf = (n) => meta(n).position || S.layout[n.id] || { x: 40, y: 40 };
+  const layoutPlugin = window.TLMCardLayout?.create({ api, state: S, nodeOf, posOf, elOf,
+    world, surface, nodesEl, redraw: () => { drawEdges(); drawConnector(); }, ensureVisible, toast });
+  const clearPlugin = window.TLMCardClear?.create({ api, state: S, layoutPlugin,
+    refreshGraph, loadHistory, confirmModal, sync, toast, fail, surface, nodesEl });
 
   /* Tree order: roots by document/order_index, children depth-first. */
   function treeOrder() {
@@ -875,15 +879,18 @@
       applyView(); savePrefs(); return;
     }
     const sx = q.x * v.z + v.x, sy = q.y * v.z + v.y;
-    if (sx < 16 || sx + 340 * v.z > sw - 16 || sy < 16 || sy + 140 * v.z > sh - 16) {
-      v.x = Math.min(40, sw - 360 * v.z) - q.x * v.z;
+    const card = elOf(n), width = card?.offsetWidth || 360, height = card?.offsetHeight || 140;
+    if (sx < 16 || sx + width * v.z > sw - 16 || sy < 16 || sy + height * v.z > sh - 16) {
+      v.x = Math.min(40, sw - width * v.z - 16) - q.x * v.z;
       v.y = sh * 0.15 - q.y * v.z;
       applyView(); savePrefs();
     }
   }
   async function persistPosition(n) {
     const q = posOf(n);
-    const updated = await api.patch(`/api/nodes/${p(n.id)}`, { metadata: { ...meta(n), position: { x: Math.round(q.x), y: Math.round(q.y) } } });
+    const updated = await api.patch(`/api/nodes/${p(n.id)}`, {
+      metadata: { ...meta(n), position: { x: Math.round(q.x), y: Math.round(q.y) } }, revision: n.revision,
+    });
     Object.assign(n, updated);
   }
   let layoutBusy = false;
@@ -891,6 +898,7 @@
     if (layoutBusy) throw new Error('节点正在排列，请稍候');
     const pool = docNodes();
     if (!pool.length) return;
+    const beforeLayout = await layoutPlugin?.beforeAutoLayout(pool);
     const projectId = S.project.id, documentId = S.doc.id;
     const current = () => S.project?.id === projectId && S.doc?.id === documentId;
     const button = $('[data-act="auto-layout"]');
@@ -924,10 +932,12 @@
       await sync(Promise.all(Array.from({ length: 4 }, async () => {
         while (queue.length && current()) await persistPosition(queue.shift());
       })));
+      if (beforeLayout && current()) layoutPlugin.afterAutoLayout(beforeLayout, pool);
       if (!silent && current()) toast('已从根到叶排列并保存布局');
     } finally {
       world.classList.remove('animate'); layoutBusy = false;
       if (button) { button.disabled = false; button.removeAttribute('aria-busy'); }
+      layoutPlugin?.endAutoLayout();
     }
   }
 
@@ -1136,7 +1146,10 @@
     surface.classList.remove('panning');
     if (d.el) d.el.classList.remove('dragging');
     if (d.moved) {
-      if (d.n) sync(persistPosition(d.n)).catch(fail); else savePrefs();
+      if (d.n) {
+        if (layoutPlugin) layoutPlugin.commitMove(d.n, { x: d.ox, y: d.oy }).catch(fail);
+        else sync(persistPosition(d.n)).catch(fail);
+      } else savePrefs();
       return;
     }
     if (d.n) { if (S.selected !== d.n.id) selectNode(d.n.id); }
@@ -1424,10 +1437,12 @@
       document_id = S.doc.id;
       source = textAnchor(origin);
     }
+    const initialPosition = placeNew(parent);
     const node = await sync(api.post(`${projectPath()}/nodes`, {
       document_id, title: guessTitle(origin.quote), kind: 'concept',
       content: origin.quote.slice(0, 20000), parent_id: parent?.id || null,
-      metadata: { source, branch_type: origin.branchType || 'auto', ...(visualSource ? { visual_source: visualSource } : {}), status: 'learning', position: placeNew(parent), pages: [] },
+      metadata: { source, branch_type: origin.branchType || 'auto', ...(visualSource ? { visual_source: visualSource } : {}),
+        status: 'learning', position: initialPosition, layout_default: { ...initialPosition, scale: 1 }, pages: [] },
     }));
     S.nodes.push(node);
     if (visualSource?.selector?.type === 'whole-image') renderVisualOriginal().catch(fail);
@@ -1439,9 +1454,15 @@
     const n = nodeOf(id);
     if (!n) return;
     const kids = childrenOf(id).length;
-    const ok = await confirmModal('删除节点', `删除「${esc(clip(n.title, 30))}」以及它的解释与连接？${kids ? `<br>${kids} 个子节点会保留，并变为顶层节点。` : ''}此操作无法撤销。`, '删除');
+    const reversible = !!clearPlugin?.available();
+    const childNote = kids ? `<br>${kids} 个子节点会保留，并${reversible ? '连接到最近的未删除祖先' : '变为顶层节点'}。` : '';
+    const ok = await confirmModal('删除节点', `删除「${esc(clip(n.title, 30))}」以及它的解释与连接？${childNote}${reversible ? '可通过“撤销”恢复。' : '此操作无法撤销。'}`, '删除');
     if (!ok) return;
-    if (running(id)) await api.cancel(S.runs[id].id).catch(() => {});
+    if (running(id)) {
+      try { await api.cancel(S.runs[id].id); S.runs[id].state = 'cancelled'; }
+      catch { /* The server deletion guard will reject a still-active run. */ }
+    }
+    if (reversible) { await clearPlugin.deleteCards([id], n.document_id); return; }
     await sync(api.del(`/api/nodes/${p(id)}`));
     if (S.selected === id) S.selected = null;
     delete S.history[id];
@@ -2422,6 +2443,8 @@
     renderCanvas();
     S.layout = { ...S.layout, ...computeLayout(false) };
     renderCanvas();
+    layoutPlugin?.onRelayout();
+    clearPlugin?.refreshButton();
   }
   async function loadHistory() {
     const items = (await sync(api.get(`${projectPath()}/explanations`))).items || [];

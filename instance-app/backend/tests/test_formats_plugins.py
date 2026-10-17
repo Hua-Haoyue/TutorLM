@@ -344,7 +344,7 @@ def _context(explain=None):
 
 def test_plugin_registry_exposes_workflows():
     registry = build_default_registry()
-    assert registry.order == ('documents', 'explanations', 'knowledge-narration')
+    assert registry.order == ('documents', 'explanations', 'knowledge-narration', 'card-clear')
     assert {'explanation', 'narration', 'retelling'} <= set(registry.executable_kinds())
     assert registry.supports('tex_compile') is False
 
