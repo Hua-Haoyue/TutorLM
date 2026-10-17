@@ -150,7 +150,8 @@ class OpenAICompatibleProvider:
             text=text,
             provider="openai_compatible",
             model=str(decoded.get("model") or self._model),
-            payload={"kind": request.kind, "answer": text, "question": request.prompt},
+            payload={"kind": request.kind, "answer": text, "question": request.prompt,
+                     "finish_reason": first.get('finish_reason') if first.get('finish_reason') in {'stop', 'length', 'content_filter', 'tool_calls'} else None},
             prompt_tokens=_as_int(usage.get("prompt_tokens")),
             completion_tokens=_as_int(usage.get("completion_tokens")),
         )

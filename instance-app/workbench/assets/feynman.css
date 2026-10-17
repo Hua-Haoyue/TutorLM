@@ -1,4 +1,6 @@
 .feynman-entry { padding: 8px 12px 4px; }
+.feynman-toolbar { display: flex; justify-content: flex-end; margin-bottom: 4px; }
+.feynman-toolbar .icon-btn { width: 28px; height: 28px; flex: 0 0 28px; }
 .feynman { margin: 12px; padding: 14px 0 4px; border-top: 1px solid var(--line-soft); font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
 .feynman-heading { display: flex; align-items: center; gap: 6px; font-weight: 600; }
 .feynman-heading .ic { flex: 0 0 16px; }

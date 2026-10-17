@@ -1371,12 +1371,13 @@
   function feynmanHtml(n, exp, run) {
     if (!feynmanEligible(n, exp)) return '';
     const state = feynmanStates.get(feynmanKey(n, exp));
-    if (!state) return `<div class="feynman-entry"><button class="btn btn--sm" data-act="node-feynman" ${run ? 'disabled' : ''}>${icon('check')}费曼验证</button></div>`;
+    if (!state || state.closed) return `<div class="feynman-entry"><button class="btn btn--sm" data-act="node-feynman" ${run ? 'disabled' : ''}>${icon('check')}${state?.quiz?.state === 'correct' ? '已通过费曼验证' : '费曼验证'}</button></div>`;
+    const close = `<div class="feynman-toolbar"><button type="button" class="icon-btn" data-act="node-feynman-close" title="关闭费曼验证" aria-label="关闭费曼验证">${icon('close')}</button></div>`;
     const q = state.quiz, busy = state.busy;
     const feedback = state.feedback ? `<div class="feynman-feedback" role="status"><strong>刚才的逻辑需要这样理解</strong><p>${esc(state.feedback.correction)}</p><blockquote>${esc(state.feedback.source_quote)}</blockquote></div>` : '';
-    if (q?.state === 'correct') return `<section class="feynman feynman--passed" aria-label="费曼验证"><div class="feynman-heading">${icon('check')}识破了这个逻辑误区</div><p>${esc(q.correction)}</p></section>`;
-    const question = q?.state === 'pending' ? `<div class="feynman-heading">${icon('comment')}笨学生 AI 向你确认</div><p class="feynman-statement">${esc(q.statement)}</p><div class="feynman-choices">${q.choices.map(c => `<button type="button" data-feynman-choice="${esc(c.id)}" ${busy || run ? 'disabled' : ''}>${esc(c.label)}</button>`).join('')}</div>` : '';
-    return `<section class="feynman" aria-label="费曼验证" aria-busy="${!!busy}">${feedback}${question}
+    if (q?.state === 'correct') return `<section class="feynman feynman--passed" aria-label="费曼验证">${close}<div class="feynman-heading">${icon('check')}识破了这个逻辑误区</div><p>${esc(q.correction)}</p></section>`;
+    const question = q?.state === 'pending' ? `<p class="feynman-statement">${esc(q.statement)}</p><div class="feynman-choices">${q.choices.map(c => `<button type="button" data-feynman-choice="${esc(c.id)}" ${busy || run ? 'disabled' : ''}>${esc(c.label)}</button>`).join('')}</div>` : '';
+    return `<section class="feynman" aria-label="费曼验证" aria-busy="${!!busy}">${close}${feedback}${question}
       ${busy ? `<p class="feynman-status" role="status">${state.phase === 'grading' ? '正在确认你的选择…' : state.feedback ? '正在换一道题…' : '正在准备验证题…'}</p>` : ''}
       ${state.error ? `<p class="feynman-error" role="alert">${esc(state.error)}</p><button class="btn btn--sm" data-act="node-feynman">${icon('redo')}重试</button>` : ''}
       </section>`;
@@ -1384,8 +1385,13 @@
   async function startFeynman(n, exp = currentPage(n)) {
     if (!feynmanEligible(n, exp) || running(n.id) || optimizingNodes.has(n.id)) return;
     const key = feynmanKey(n, exp), previous = feynmanStates.get(key);
-    if (previous?.busy) return;
-    const state = { ...previous, busy: true, phase: 'generating', error: null };
+    if (previous) {
+      previous.closed = false;
+      renderNode(n.id);
+      if (previous.busy || previous.quiz?.state === 'correct' || previous.quiz?.state === 'pending') return;
+    }
+    const state = previous || {};
+    Object.assign(state, { busy: true, phase: 'generating', error: null, closed: false });
     feynmanStates.set(key, state); renderNode(n.id);
     try {
       const current = await api.get(`/api/nodes/${p(n.id)}/feynman?explanation_id=${p(exp.id)}`);
@@ -1419,7 +1425,7 @@
       state.busy = false;
       if (nodeOf(n.id)) renderNode(n.id);
     }
-    if (state.quiz.state === 'incorrect') await startFeynman(n, exp);
+    if (state.quiz.state === 'incorrect' && !state.closed) await startFeynman(n, exp);
   }
 
   /* Answer HTML with the user's marks (bold / italic / highlight) and the words
@@ -1714,6 +1720,12 @@
     const choice = e.target.closest('[data-feynman-choice]')?.dataset.feynmanChoice;
     if (choice !== undefined) { await answerFeynman(n, choice); return; }
     if (act === 'node-feynman') { await startFeynman(n); return; }
+    if (act === 'node-feynman-close') {
+      const exp = currentPage(n);
+      const state = exp && feynmanStates.get(feynmanKey(n, exp));
+      if (state) { state.closed = true; renderNode(n.id); }
+      return;
+    }
     if (act === 'node-parent') { selectNode(meta(n).source?.fromNode, { center: true }); return; }
     if (act === 'node-delete') await deleteNode(n.id);
     if (act === 'node-collapse') selectNode(null);
