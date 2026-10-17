@@ -79,7 +79,10 @@ class GeminiProvider:
         if not isinstance(candidate, dict):
             raise ProviderUnavailable('Gemini returned no candidates (possibly blocked)')
         if candidate.get('finishReason') not in (None, 'STOP'):
-            raise ProviderUnavailable('Gemini generation did not finish successfully')
+            finish = candidate.get('finishReason')
+            safe_finish = finish if finish in {'MAX_TOKENS', 'SAFETY', 'RECITATION', 'OTHER'} else 'unspecified'
+            message = '验证题生成达到输出上限，请重试' if request.kind == 'feynman' and finish == 'MAX_TOKENS' else 'Gemini generation did not finish successfully'
+            raise ProviderUnavailable(message, details={'finish_reason': safe_finish})
         content = candidate.get('content')
         parts = content.get('parts') if isinstance(content, dict) else None
         if not isinstance(parts, list):
@@ -90,6 +93,7 @@ class GeminiProvider:
             raise ProviderUnavailable('Gemini returned no answer text')
         usage = data.get('usageMetadata') or {}
         return GenerateResult(text=text, provider='gemini', model=self._model,
+                              payload={'finish_reason': candidate.get('finishReason') if candidate.get('finishReason') in {'STOP', 'MAX_TOKENS', 'SAFETY', 'RECITATION', 'OTHER'} else None},
                               prompt_tokens=usage.get('promptTokenCount'),
                               completion_tokens=usage.get('candidatesTokenCount'))
 
