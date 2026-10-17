@@ -38,7 +38,7 @@ VALID_RUN_MODES: tuple[str, ...] = (RUN_MODE_LOCAL, RUN_MODE_DEMO, RUN_MODE_MANA
 #: provider 名称。
 PROVIDER_FAKE = "fake"
 PROVIDER_OPENAI_COMPATIBLE = "openai_compatible"
-VALID_PROVIDERS: tuple[str, ...] = (PROVIDER_FAKE, PROVIDER_OPENAI_COMPATIBLE)
+VALID_PROVIDERS: tuple[str, ...] = (PROVIDER_FAKE, PROVIDER_OPENAI_COMPATIBLE, 'gemini')
 
 #: 数据挂在容器内的默认挂载点（v1）。
 DEFAULT_MOUNT_PATH = "/data"
@@ -222,7 +222,7 @@ class Settings:
                 maximum=600.0,
             ),
         )
-        if provider == PROVIDER_OPENAI_COMPATIBLE:
+        if provider in (PROVIDER_OPENAI_COMPATIBLE, 'gemini'):
             missing_model = [
                 name
                 for name, value in (
@@ -234,7 +234,7 @@ class Settings:
             ]
             if missing_model:
                 raise ConfigInvalid(
-                    "openai_compatible provider 缺少必需配置：" + ", ".join(missing_model),
+                    provider + " provider 缺少必需配置：" + ", ".join(missing_model),
                     details={"missing": missing_model},
                 )
 

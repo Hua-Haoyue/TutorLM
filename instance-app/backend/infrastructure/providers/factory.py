@@ -5,6 +5,7 @@ from __future__ import annotations
 from backend.application.ports.config import AppSettings
 from backend.domain.errors import ConfigInvalid
 from backend.infrastructure.providers.fake import FakeProvider
+from backend.infrastructure.providers.gemini import GeminiProvider
 from backend.infrastructure.providers.openai_compatible import OpenAICompatibleProvider, Transport
 from backend.infrastructure.settings import (
     PROVIDER_FAKE,
@@ -21,8 +22,9 @@ def build_provider(settings: Settings | AppSettings, *, transport: Transport | N
         raise ConfigInvalid("settings 缺少 model 配置")
     if model.provider == PROVIDER_FAKE:
         return FakeProvider(model=model.name or "offline-demo")
-    if model.provider == PROVIDER_OPENAI_COMPATIBLE:
-        return OpenAICompatibleProvider(
+    if model.provider in (PROVIDER_OPENAI_COMPATIBLE, 'gemini'):
+        provider_class = GeminiProvider if model.provider == 'gemini' else OpenAICompatibleProvider
+        return provider_class(
             api_base=model.api_base or "",
             api_key=model.api_key or "",
             model=model.name,

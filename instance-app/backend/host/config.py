@@ -22,7 +22,7 @@ TRUE_VALUES = {"1", "true", "yes", "on"}
 FALSE_VALUES = {"0", "false", "no", "off", ""}
 
 RUN_MODES = ("local", "demo", "managed")
-PROVIDERS = ("fake", "openai_compatible")
+PROVIDERS = ("fake", "openai_compatible", "gemini")
 
 #: Subtrees that must never live inside the workspace volume. Copying a volume
 #: tree that contains any of these would hand the receiver somebody else's
@@ -98,7 +98,7 @@ class ProviderConfig:
     def available(self) -> bool:
         if self.name == "fake":
             return True
-        return self.name == "openai_compatible" and bool(self.api_base) and self.has_api_key
+        return self.name in ("openai_compatible", "gemini") and bool(self.api_base) and self.has_api_key
 
     def public(self) -> dict[str, object]:
         """Discovery payload for GET /api/runtime (never includes the key)."""
@@ -230,7 +230,7 @@ class HostConfig:
 
         provider_name = (_optional(env, "TUTORLM_PROVIDER") or "fake").lower()
         if provider_name not in PROVIDERS:
-            raise BadRequest("TUTORLM_PROVIDER must be fake or openai_compatible", code="invalid_configuration")
+            raise BadRequest("TUTORLM_PROVIDER must be fake, openai_compatible or gemini", code="invalid_configuration")
 
         provider = ProviderConfig(
             name=provider_name,

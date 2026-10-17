@@ -108,9 +108,13 @@ def build_host_provider(config):
     if config.name == 'fake':
         return FakeProvider(config.model)
     from backend.infrastructure.providers.openai_compatible import OpenAICompatibleProvider
-    if config.name != 'openai_compatible' or not config.api_base or not config.api_key:
+    if config.name not in ('openai_compatible', 'gemini') or not config.api_base or not config.api_key:
         raise ProviderError('Model provider configuration is incomplete')
-    return OpenAIProvider(OpenAICompatibleProvider(
+    transport_class = OpenAICompatibleProvider
+    if config.name == 'gemini':
+        from backend.infrastructure.providers.gemini import GeminiProvider
+        transport_class = GeminiProvider
+    return OpenAIProvider(transport_class(
         api_base=config.api_base, api_key=config.api_key, model=config.model,
         timeout_seconds=config.timeout_seconds, max_tokens=config.max_tokens,
     ), max_tokens=config.max_tokens, timeout_seconds=config.timeout_seconds)
