@@ -7,13 +7,32 @@
   const page = document.querySelector('.page');
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  // Cover image: show the placeholder only when the image is missing.
-  const img = plate?.querySelector('img');
-  if (img) {
-    const missing = () => { img.remove(); plate.querySelector('.cover__ph').hidden = false; };
-    if (img.complete && !img.naturalWidth) missing();
-    img.addEventListener('error', missing, { once: true });
-    img.addEventListener('load', () => { plate.querySelector('.cover__ph').hidden = true; }, { once: true });
+  // Cover video: autoplay muted loop; fall back to the placeholder only when it
+  // cannot play (missing file / autoplay blocked / decode error).
+  const video = plate?.querySelector('video');
+  if (video) {
+    const ph = plate.querySelector('.cover__ph');
+    const fallback = () => { video.remove(); ph.hidden = false; };
+    if (reduce) {
+      // Respect reduced motion: keep the poster, do not start playback.
+      video.autoplay = false;
+      video.removeAttribute('autoplay');
+      video.pause();
+    } else {
+      const started = video.play();
+      if (started) started.catch(fallback);
+      video.addEventListener('error', fallback, { once: true });
+    }
+  }
+
+  // Cover title: the self-writing SVG strokes are inlined by
+  // assets/cover-writing.js. The plain text below stays as a fallback when that
+  // module is unavailable (offline assets, reduced motion).
+  const brandEl = document.getElementById('cover-brand');
+  const taglineEl = document.getElementById('cover-tagline');
+  if (brandEl && taglineEl && !brandEl.textContent.trim()) {
+    brandEl.textContent = 'TutorLM';
+    taglineEl.textContent = '懂 你 意 思';
   }
 
   let ticking = false;

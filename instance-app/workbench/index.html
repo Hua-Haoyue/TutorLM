@@ -94,7 +94,7 @@
 <body>
 <header class="nav">
   <div class="wrap">
-    <a class="logo" href="index.html"><b>T</b>TutorLM</a>
+    <a class="logo" href="index.html"><img class="logo__img" src="assets/logo.png" alt="TutorLM"></a>
     <a class="nav__link" href="how.html">工作方式</a>
     <a class="nav__link" href="terms.html">试用条款</a>
     <a class="nav__link" href="design.html">设计文档</a>
@@ -103,10 +103,17 @@
   </div>
 </header>
 
-<section class="cover" aria-label="封面">
+<section class="cover cover--full" aria-label="封面">
   <div class="cover__plate">
-    <img src="assets/cover.jpg" alt="TutorLM 封面">
-    <div class="cover__ph" hidden><strong>TutorLM</strong><span>封面图片位置 · assets/cover.jpg</span></div>
+    <video class="cover__video" autoplay muted loop playsinline preload="auto"
+           poster="assets/cover-poster.jpg" aria-hidden="true">
+      <source src="assets/cover.mp4" type="video/mp4">
+    </video>
+    <div class="cover__ph" hidden><strong>TutorLM</strong><span>封面视频 · assets/cover.mp4</span></div>
+    <div class="cover__title" aria-label="TutorLM 懂你意思">
+      <span class="cover__brand" aria-hidden="true"><span class="cover__brand-latin" id="cover-brand"></span></span>
+      <span class="cover__tilt" aria-hidden="true"><span class="cover__tagline" id="cover-tagline"></span></span>
+    </div>
     <a class="cover__hint" href="#start-here">向下滚动<svg class="ic"><use href="#i-chev-d"/></svg></a>
   </div>
 </section>
@@ -303,5 +310,9 @@
 <script src="assets/api.js"></script>
 <script src="assets/entry.js"></script>
 <script src="assets/site.js"></script>
+<script type="module">
+  import { mountCoverWriting } from './assets/cover-writing.js';
+  mountCoverWriting();
+</script>
 </body>
 </html>
