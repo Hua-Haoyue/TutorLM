@@ -12,7 +12,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: node --test instance-app/frontend/tests/*.test.js
+          cache: npm
+          cache-dependency-path: instance-app/frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: instance-app/frontend
+        run: npm ci
+      - name: Frontend lifecycle tests
+        run: node --test instance-app/frontend/tests/*.test.js
 
   control-plane:
     runs-on: ubuntu-latest

@@ -122,6 +122,18 @@ provider emits deterministic relation suggestions; no paid model is involved.
 
 ## Current Integration Boundaries
 
+Explanation versions have previous/next controls. The selected version is stored
+in node metadata and survives reload; chat replies do not replace explanation
+pages. The original/optimized explanation switch remains available for retellings.
+`scripts/browser-pagination.cjs` exercises the version navigation against a
+disposable local fake backend.
+
+Feynman evidence is selected using server-supplied fragment IDs rather than
+model-rewritten quotations. Closing a check hides its panel without losing the
+current question or passed result; reopening does not request a fresh question.
+The focused workflow/diagnostic tests cover invalid model responses and private
+answer keys. Browser coverage is in `scripts/browser-feynman.cjs`.
+
 Business data uses the actual `/api` endpoints and requires an application Bearer.
 PDF rendering uses authenticated original-file reads and the shared Reader modules.
 Drawing and view preferences are browser-local rather than server project content.
@@ -165,5 +177,9 @@ loopback gateway, a separate loopback admin origin and an explicit admin token.
 `APP_URL` and optionally `APP_INVITE` for invitation-only mode. These tests
 create persistent test projects and can preempt test compute; never use a
 production stack. Remove test volumes with the disposable stack afterwards.
-Screenshots and test output under `.work/` are ignored. The optional cover image
-is `assets/cover.jpg`; the page displays a placeholder when it is absent.
+Screenshots and test output under `.work/` are ignored. The homepage uses
+`assets/cover.mp4`, its static `cover-poster.jpg`, `logo.png`, and the local
+animated brand/tagline SVGs. Reduced-motion mode keeps the poster paused and
+plain title text. `scripts/browser-homepage.cjs` checks desktop/mobile playback,
+reduced motion, title bounds and the missing-SVG fallback without creating any
+application data or calling a model.

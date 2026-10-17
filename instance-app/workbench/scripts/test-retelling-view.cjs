@@ -11,7 +11,7 @@ function fixture() {
   const retelling = { id: 'retelling', answer: 'New', created_at: '2026-10-17T02:00:00Z',
     learning: { retelling: { source_explanation_id: original.id } } };
   const context = { S: { history: { node: [retelling, original] } }, meta: node => node.metadata };
-  const start = source.indexOf('  function latestExplanation(');
+  const start = source.indexOf('  const byTime =');
   const end = source.indexOf('  const marksOf', start);
   vm.runInNewContext(source.slice(start, end) + '\nthis.currentPage = currentPage;', context);
   return { context, node: { id: 'node', metadata: {} }, original, retelling };
@@ -21,6 +21,27 @@ test('retelling is displayed by default without replacing the stored source', ()
   const { context, node, original, retelling } = fixture();
   assert.equal(context.currentPage(node), retelling);
   assert.equal(context.S.history.node[1], original);
+});
+
+test('explicit page order and selected index win over newer chat replies', () => {
+  const { context, node, original, retelling } = fixture();
+  node.metadata.pages = [original.id, retelling.id];
+  node.metadata.page = 0;
+  context.S.history.node.unshift({ id: 'chat', answer: 'Chat reply', created_at: '2026-10-18T00:00:00Z' });
+  assert.equal(context.currentPage(node), original);
+  node.metadata.page = 1;
+  assert.equal(context.currentPage(node), retelling);
+  node.metadata.retelling_view = { explanation_id: retelling.id, original: true };
+  assert.equal(context.currentPage(node), original);
+});
+
+test('page indices are clamped after history pruning', () => {
+  const { context, node, original } = fixture();
+  node.metadata.pages = ['missing', original.id];
+  node.metadata.page = 99;
+  assert.equal(context.currentPage(node), original);
+  node.metadata.page = -5;
+  assert.equal(context.currentPage(node), original);
 });
 
 test('saved view switches to the exact source explanation and back', () => {

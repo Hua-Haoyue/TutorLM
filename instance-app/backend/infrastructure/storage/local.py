@@ -25,6 +25,7 @@ from backend.domain.errors import (
     ImmutableContentError,
     NotFound,
     PathOutsideRoot,
+    SymlinkRejected,
 )
 from backend.domain.hashing import content_hash_of_chunks
 from backend.domain.paths import assert_safe_segment, normalize_relative_path
@@ -194,7 +195,7 @@ class LocalContentStore:
     def exists(self, *, relative_path: str) -> bool:
         try:
             path = self._resolve(relative_path)
-        except PathOutsideRoot:
+        except (PathOutsideRoot, SymlinkRejected):
             return False
         if not os.path.isfile(path):
             return False

@@ -3,9 +3,11 @@ import logging
 
 import pytest
 
+pytest_plugins = ('test_feynman_workflow',)
+
 from backend.application.services.feynman import FeynmanService, QuestionText, source_fragments
 from backend.host.errors import Unprocessable
-from test_feynman_workflow import optimized, generate, SOURCE
+from test_feynman_workflow import generate, SOURCE
 
 
 def valid():

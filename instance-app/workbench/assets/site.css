@@ -9,6 +9,7 @@ body { min-height: 100vh; display: flex; flex-direction: column; }
 .nav .wrap { height: 64px; display: flex; align-items: center; gap: 8px; }
 .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); margin-right: auto; }
 .logo__img { height: 34px; width: auto; display: block; }
+.logo b { width: 24px; height: 24px; border-radius: var(--r-sm); background: var(--ink); color: var(--paper); display: grid; place-items: center; font-size: 12px; }
 .nav a.nav__link { color: var(--ink-2); text-decoration: none; font-size: 14px; padding: 8px 12px; border-radius: var(--r); }
 .nav a.nav__link:hover { background: var(--paper-2); }
 .nav a.nav__link[aria-current="page"] { color: var(--ink); font-weight: 600; }
@@ -30,10 +31,10 @@ body { min-height: 100vh; display: flex; flex-direction: column; }
 .cover__video { z-index: 0; background: #000; }
 
 /* Full-screen variant: the plate bleeds to every edge with no rounded frame. */
-.cover--full { padding: 0; }
+.cover.cover--full { padding: 0; }
 .cover--full .cover__plate { max-width: none; border-radius: 0; }
 @media (prefers-reduced-motion: reduce) {
-  .cover__video { display: none; } /* keep the static poster frame instead */
+  .cover__video { display: block; } /* paused video retains its poster */
 }
 .cover__ph { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 10px; color: var(--muted); }
 .cover__ph strong { font: 300 clamp(48px, 8vw, 120px)/1 var(--sans); letter-spacing: .06em; color: var(--ink); }
@@ -52,7 +53,7 @@ body { min-height: 100vh; display: flex; flex-direction: column; }
   display: inline-block;
   transform: rotate(-6deg);
   transform-origin: left center;
-  margin-left: clamp(-96px, -6vw, -24px);
+  margin-left: 0;
 }
 .cover__tilt {
   display: inline-block;

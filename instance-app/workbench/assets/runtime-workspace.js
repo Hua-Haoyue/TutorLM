@@ -1477,7 +1477,7 @@
         title="${showingOriginal ? '切换到优化后的新解释' : '切换到原解释'}" aria-pressed="${!!showingOriginal}">
         ${icon(showingOriginal ? 'arrow-r' : 'arrow-l')}${showingOriginal ? '查看新解释' : '查看原解释'}</button>` : '';
     const pageBody = page
-      ? `<div class="xpl__body"><div class="answer" data-answer-node="${esc(n.id)}" data-exp="${esc(page.id)}">${answerHtml(n, page)}</div></div>`
+      ? `${pager}<div class="xpl__body"><div class="answer" data-answer-node="${esc(n.id)}" data-exp="${esc(page.id)}">${answerHtml(n, page)}</div></div>`
       : `<div class="xpl__empty"><span>${canExplain ? '还没有解释。' : '当前镜像未启用解释工作流。'}</span>${canExplain ? `<button class="btn btn--sm btn--primary" data-act="node-explain" ${run ? 'disabled' : ''}>${icon('sparkle')}生成解释</button>` : ''}</div>`;
     return `<div class="gnode sel ${m.status === 'mastered' ? 'mastered' : ''}" ${attrs} role="group" aria-label="知识节点：${esc(n.title)}">
       <div class="gnode__head">

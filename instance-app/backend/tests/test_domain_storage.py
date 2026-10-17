@@ -1516,6 +1516,10 @@ def test_local_content_store_rejects_symlinked_artifact(monkeypatch, tmp_path: P
             return os.stat_result(tuple([stat_module.S_IFLNK | 0o777] + list(info)[1:]))
         return info
 
-    monkeypatch.setattr(local_module.os, "lstat", fake_lstat)
+    # Patch only the final-file guard. Patching os.lstat globally also changes
+    # POSIX realpath into following a fake symlink that has no readlink target.
+    from backend.infrastructure.storage import paths as storage_paths
+    import types
+    monkeypatch.setattr(storage_paths, "os", types.SimpleNamespace(**(vars(os) | {"lstat": fake_lstat})))
     with pytest.raises(SymlinkRejected):
         store.read_source(relative_path="artifacts/d1/r1/extracted_text/e.txt")
