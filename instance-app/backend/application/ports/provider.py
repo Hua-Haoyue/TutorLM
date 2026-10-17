@@ -33,6 +33,8 @@ class GenerateRequest:
     timeout_seconds: float | None = None
     json_object: bool = False
     json_schema: dict[str, Any] | None = None
+    reasoning_effort: str = 'auto'
+    web_search: bool = False
 
 
 @dataclass(frozen=True, slots=True)

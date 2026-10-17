@@ -50,3 +50,13 @@ test('older servers receive only supported fields and keep the legacy style hint
   assert.equal(input.response_mode, 'expand');
   assert(input.question.length <= 1000);
 });
+
+test('switching to an unsupported model does not send incompatible cached preferences', () => {
+  const c = fixture({ preferences: {properties: {model: {}}} });
+  c.prefs.effort = 'high'; c.prefs.webSearch = true;
+  let options = c.explanationInput('node').preferences.model;
+  assert.equal(options.effort, 'auto'); assert.equal(options.web_search, false);
+  c.api.runtime.model_features = {effort:true,web_search:true};
+  options = c.explanationInput('node').preferences.model;
+  assert.equal(options.effort, 'high'); assert.equal(options.web_search, true);
+});

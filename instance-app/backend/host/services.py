@@ -208,6 +208,8 @@ class AppServices:
         self.provider = provider or FakeProvider(config.provider.model)
         self.runs.draft_committer = self.commit_draft
         self._register_handlers()
+        from backend.application.services.workspace_agent import WorkspaceAgent
+        self.agent = WorkspaceAgent(self)
 
     # -- identity --------------------------------------------------------
     @property
@@ -254,6 +256,7 @@ class AppServices:
 
     def document_public(self, row: Mapping[str, Any]) -> dict[str, Any]:
         return {
+            **({'code_path': _json_or(row.get('extra_json'), {}).get('code_path')} if _json_or(row.get('extra_json'), {}).get('code_path') else {}),
             "id": row["id"],
             "project_id": row["project_id"],
             "title": row["title"],
@@ -401,6 +404,8 @@ class AppServices:
             "provider": {"name": self.config.provider.name, "model": self.config.provider.model},
             "plugins": self.plugins.public(),
             "limits": self.config.limits.public(),
+            "model_features": getattr(self.provider, 'model_features', lambda: {'effort': False, 'web_search': False, 'offline': False})(),
+            "workspace_agent": {"enabled": True, "execution": False, "writes_require_approval": True},
         }
 
     # -- documents --------------------------------------------------------
@@ -479,6 +484,17 @@ class AppServices:
         project = self.require_project(project_id)
         self._assert_document_quota(project["id"])
         self._assert_file_size(payload)
+
+        from backend.application.services.code_project import EXTENSIONS
+        from pathlib import PurePosixPath
+        if PurePosixPath(filename).suffix.lower() in EXTENSIONS:
+            try:
+                text = decode_utf8_strict(payload)
+            except DomainError as exc:
+                raise app_errors.EncodingUnsupported(str(exc)) from exc
+            public = self.agent.code.write(filename, text)
+            document = self.require_document(public['id'])
+            return document, self.require_revision(document, None)
 
         try:
             probe = detect(payload, filename=filename, declared_mime=declared_mime)
@@ -1125,6 +1141,12 @@ class AppServices:
         session_id: str,
     ) -> dict[str, Any]:
         """Queue a registered plugin workflow for the workspace-bound project."""
+        if kind == 'workspace_chat':
+            self.agent.validate(dict(input_payload), session_id)
+            run = self.runs.submit(kind=kind, workload='model', input_payload=dict(input_payload),
+                project_id=self.current_project()['id'], session_id=session_id,
+                idempotency_key=idempotency_key, idempotency_scope=f'chat:{session_id}')
+            return self.run_public(run)
         if kind == 'feynman':
             if not self.plugins.supports('explanation'):
                 raise app_errors.WorkflowDisabled('Explanation workflow is disabled')

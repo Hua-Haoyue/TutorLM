@@ -1,0 +1,27 @@
+.code-toolbar { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 0; border-bottom:1px solid var(--line); }
+.code-toolbar .mono { overflow-wrap:anywhere; font-size:12px; }
+.code-reading { overflow:auto; max-width:100%; background:var(--sheet); border:1px solid var(--line); margin-top:12px; }
+pre.code-source { margin:0; padding:16px; font:13px/1.7 var(--mono); tab-size:4; white-space:pre; color:var(--ink); }
+.code-editor textarea { display:block; width:100%; min-height:400px; resize:vertical; padding:16px; font:13px/1.7 var(--mono); tab-size:4; white-space:pre; overflow:auto; border:1px solid var(--line); color:var(--ink); background:var(--sheet); }
+.code-source .hljs-keyword,.code-source .hljs-selector-tag { color:#b44758; }
+.code-source .hljs-string,.code-source .hljs-attr { color:#28795d; }
+.code-source .hljs-number,.code-source .hljs-literal { color:#8761aa; }
+.code-source .hljs-title,.code-source .hljs-built_in { color:#3978ad; }
+.code-source .hljs-comment { color:var(--muted); font-style:italic; }
+.workspace-chat { position:fixed; left:calc(100vw - 464px); top:92px; width:440px; height:560px; max-width:calc(100vw - 16px); max-height:calc(100dvh - 24px); min-width:min(280px,calc(100vw - 16px)); min-height:220px; resize:both; overflow:hidden; z-index:90; border:1px solid var(--line); border-radius:6px; box-shadow:0 10px 36px #0002; background:var(--sheet); display:flex; flex-direction:column; }
+.workspace-chat[hidden],.code-editor[hidden],.code-reading[hidden] { display:none; }
+.workspace-chat-head { display:flex; align-items:center; gap:8px; padding:8px 12px; border-bottom:1px solid var(--line); background:var(--paper-2); cursor:move; touch-action:none; flex-shrink:0; }
+.workspace-chat-spacer { flex:1; }
+.workspace-chat-messages { flex:1; min-height:0; overflow:auto; padding:12px; }
+.workspace-chat-message { padding:10px 0; border-bottom:1px solid var(--line-soft); overflow-wrap:anywhere; }
+.workspace-chat-message>strong { display:block; margin-bottom:6px; font-size:12px; color:var(--muted); }
+.workspace-chat-message.user { background:var(--paper-2); padding:10px 8px; }
+.workspace-chat-status { display:block; padding:0 12px; font-size:12px; color:var(--muted); overflow-wrap:anywhere; }
+.workspace-chat-form { display:flex; gap:6px; padding:12px; border-top:1px solid var(--line); }
+.workspace-chat-form textarea { flex:1; min-width:0; max-height:160px; resize:vertical; border:1px solid var(--line); border-radius:4px; background:var(--sheet); color:var(--ink); padding:8px; font:13px/1.5 var(--sans); }
+.workspace-chat-actions { display:flex; flex-direction:column; justify-content:flex-end; }
+.workspace-chat-proposal { padding:12px 0; border-bottom:1px solid var(--line); }
+.workspace-chat-proposal details { padding:6px 0; }
+.workspace-chat-proposal pre { max-height:180px; overflow:auto; font:12px/1.5 var(--mono); }
+.workspace-chat-proposal button { margin:6px 6px 0 0; }
+.prefs select.input { width:auto; max-width:210px; }

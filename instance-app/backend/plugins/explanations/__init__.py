@@ -6,6 +6,7 @@ from typing import Any
 
 from backend.plugin_contracts import Draft, PanelDeclaration, PluginManifest, WorkflowDeclaration, WorkflowInput
 from backend.plugin_contracts.validation import checkpoint
+from backend.application.services.model_options import MODEL_OPTIONS_SCHEMA
 
 INPUT_SCHEMA = {
     "type": "object", "required": ["node_id"], "additionalProperties": False,
@@ -19,6 +20,10 @@ INPUT_SCHEMA = {
                 "style": {"type": "string", "enum": ["auto", "plain", "rigorous", "example", "analogy", "socratic"]},
                 "length": {"type": "string", "enum": ["short", "medium", "long"]},
                 "language": {"type": "string", "enum": ["auto", "zh", "en"]},
+                "model": {"type": "object", "additionalProperties": False, "properties": {
+                    "effort": {"type": "string", "enum": ["auto", "low", "medium", "high"]},
+                    "web_search": {"type": "boolean"}}},
+                "code_context": {"type": "boolean"},
             },
         },
         "purpose": {"type": "string", "enum": ["explain", "optimize"]},
@@ -85,7 +90,7 @@ MANIFEST = PluginManifest.build(
         WorkflowDeclaration(
             id='graph_relations.v1', kind='graph_relations', title='AI 梳理关系',
             input_schema={'type': 'object', 'required': ['document_id'], 'additionalProperties': False,
-                          'properties': {'document_id': {'type': 'string', 'minLength': 1, 'maxLength': 128}}},
+                          'properties': {'document_id': {'type': 'string', 'minLength': 1, 'maxLength': 128}, 'model': MODEL_OPTIONS_SCHEMA}},
             required_capabilities=['knowledge.edges.read', 'models.generate'],
         ),
     ],

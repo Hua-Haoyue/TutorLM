@@ -22,6 +22,7 @@ from backend.host.state import AppState, build_state
 
 from .errors import error_response, install_error_handlers
 from .routers import documents, graph, health, learning, projects, runs, runtime, sessions, sources
+from .routers import workspace_tools
 from .dependencies import require_session
 from backend.host.context import PluginHostContext
 
@@ -93,6 +94,7 @@ def build_app(state: AppState) -> FastAPI:
     app.include_router(graph.router)
     app.include_router(runs.router)
     app.include_router(sources.router)
+    app.include_router(workspace_tools.router)
     app.include_router(learning.router)
     for plugin_id, instance in state.plugins.instances():
         scoped_router = APIRouter(prefix=f'/api/plugins/{plugin_id}', dependencies=[Depends(require_session)])

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TutorLM · 工作区</title>
-<meta name="tlm-ui-build" content="obstacles-20261017-r2">
+<meta name="tlm-ui-build" content="workspace-tools-20261018-r1">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Crect width=%2216%22 height=%2216%22 fill=%22%23111%22/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
@@ -26,9 +26,10 @@
 <link rel="stylesheet" href="assets/katex/katex.min.css">
 <link rel="stylesheet" href="assets/obstacles.css?v=obstacles-20261017-r2">
 <link rel="stylesheet" href="assets/graph-relations.css?v=relations-20261017-r1">
-<link rel="stylesheet" href="assets/card-layout.css?v=1">
+<link rel="stylesheet" href="assets/card-layout.css?v=workspace-tools-20261018-r1">
 <link rel="stylesheet" href="assets/card-clear.css?v=2">
 <link rel="stylesheet" href="assets/feynman.css?v=2">
+<link rel="stylesheet" href="assets/workspace-tools.css">
 </head>
 <body>
 <div class="app" id="app">
@@ -44,6 +45,7 @@
       </button>
       <div class="menu" id="ws-menu" role="menu" hidden></div>
     </div>
+    <button class="tb-btn" id="workspace-chat-toggle" aria-pressed="false" aria-controls="workspace-chat">Chat</button>
 
     <div class="topbar__right">
       <span class="ttl" id="ttl" title="试用剩余时间"><svg class="ic"><use href="#i-clock"/></svg><span id="ttl-v">--:--</span></span>
@@ -89,7 +91,9 @@
         <button class="icon-btn" data-act="new-file" title="新建文档（粘贴正文）"><svg class="ic"><use href="#i-file-plus"/></svg></button>
         <button class="icon-btn" data-act="new-folder" title="新建文件夹"><svg class="ic"><use href="#i-folder-plus"/></svg></button>
       </div>
-      <input type="file" id="file-input" accept=".md,.markdown,.txt,.pdf,.tex,.zip,text/markdown,text/plain,application/pdf" multiple hidden>
+      <input type="file" id="file-input" multiple hidden>
+      <button class="icon-btn" id="code-import" title="导入代码工程 ZIP" aria-label="导入代码工程 ZIP"><svg class="ic"><use href="#i-file-code"/></svg></button>
+      <input type="file" id="code-project-input" accept=".zip" hidden>
       <input type="file" id="visual-file" accept="image/png,image/jpeg,image/webp" hidden>
     </div>
     <div class="filter">
@@ -109,6 +113,7 @@
         <button role="radio" data-view="md" aria-checked="true">MD</button>
         <button role="radio" data-view="raw" aria-checked="false">RAW</button>
         <button role="radio" data-view="pdf" aria-checked="false">PDF</button>
+        <button role="radio" data-view="code" aria-checked="false">Code</button>
       </div>
       <span class="vsep"></span>
       <button class="icon-btn" data-tool="select" aria-pressed="true" title="选择后提问"><svg class="ic"><use href="#i-cursor"/></svg></button>
@@ -251,16 +256,19 @@
 
 <script src="assets/common.js"></script>
 <script src="assets/qrcode.min.js"></script>
-<script src="assets/api.js"></script>
+<script src="assets/api.js?v=workspace-tools-20261018-r1"></script>
 <script src="assets/ink.js"></script>
 <script src="assets/katex/katex.min.js"></script>
 <script src="assets/markdown-it/markdown-it.min.js"></script>
 <script src="assets/markdown.js"></script>
+<script src="assets/highlight/highlight.min.js"></script>
+<script src="assets/code-workspace.js"></script>
 <script src="assets/md-ir.js?v=1"></script>
 <script src="assets/dagre/dagre.min.js"></script>
-<script src="assets/graph-layout.js"></script>
-<script src="assets/card-layout.js?v=1"></script>
+<script src="assets/graph-layout.js?v=workspace-tools-20261018-r1"></script>
+<script src="assets/card-layout.js?v=workspace-tools-20261018-r1"></script>
 <script src="assets/card-clear.js?v=2"></script>
-<script src="assets/runtime-workspace.js?v=feynman-pagination-20261018"></script>
+<script src="assets/runtime-workspace.js?v=workspace-tools-20261018-r1"></script>
+<script src="assets/workspace-chat.js"></script>
 </body>
 </html>

@@ -12,9 +12,14 @@ EXPLANATION_STYLES = ('auto', 'plain', 'rigorous', 'example', 'analogy', 'socrat
 def explanation_preferences(value=None):
     if value is None:
         value = {}
-    if not isinstance(value, dict) or set(value) - {'style', 'length', 'language'}:
+    if not isinstance(value, dict) or set(value) - {'style', 'length', 'language', 'model', 'code_context'}:
         raise InvalidInputError('Invalid explanation preferences')
     result = {'style': 'auto', 'length': 'medium', 'language': 'auto'} | value
+    if 'model' in value:
+        from backend.application.services.model_options import model_options
+        result['model'] = model_options(value['model'])
+    if 'code_context' in value and type(value['code_context']) is not bool:
+        raise InvalidInputError('code_context must be boolean')
     for key, choices in (('style', EXPLANATION_STYLES),
                          ('length', ('short', 'medium', 'long')), ('language', ('auto', 'zh', 'en'))):
         if result[key] not in choices:

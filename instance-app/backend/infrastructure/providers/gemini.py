@@ -52,6 +52,20 @@ class GeminiProvider:
                                      'temperature': 0}}
         if request.system:
             body['systemInstruction'] = {'parts': [{'text': request.system}]}
+        if request.reasoning_effort != 'auto':
+            body['generationConfig']['maxOutputTokens'] = max(body['generationConfig']['maxOutputTokens'],
+                {'low': 4096, 'medium': 8192, 'high': 16384}[request.reasoning_effort])
+            if self._model.startswith('gemini-3'):
+                level = request.reasoning_effort
+                if 'pro' in self._model and level == 'medium':
+                    level = 'high'
+                body['generationConfig']['thinkingConfig'] = {'thinkingLevel': level}
+            elif self._model.startswith('gemini-2.5'):
+                body['generationConfig']['thinkingConfig'] = {'thinkingBudget': {'low': 1024, 'medium': 4096, 'high': 8192}[request.reasoning_effort]}
+            else:
+                raise ProviderUnavailable('This Gemini model does not declare configurable thinking')
+        if request.web_search:
+            body['tools'] = [{'google_search': {}}]
         if request.json_object:
             body['generationConfig']['responseMimeType'] = 'application/json'
             if request.json_schema:
@@ -93,7 +107,9 @@ class GeminiProvider:
             raise ProviderUnavailable('Gemini returned no answer text')
         usage = data.get('usageMetadata') or {}
         return GenerateResult(text=text, provider='gemini', model=self._model,
-                              payload={'finish_reason': candidate.get('finishReason') if candidate.get('finishReason') in {'STOP', 'MAX_TOKENS', 'SAFETY', 'RECITATION', 'OTHER'} else None},
+                              payload={'finish_reason': candidate.get('finishReason') if candidate.get('finishReason') in {'STOP', 'MAX_TOKENS', 'SAFETY', 'RECITATION', 'OTHER'} else None,
+                                       'sources': [item['web'] for item in (candidate.get('groundingMetadata') or {}).get('groundingChunks', [])
+                                                   if isinstance(item, dict) and isinstance(item.get('web'), dict)]},
                               prompt_tokens=usage.get('promptTokenCount'),
                               completion_tokens=usage.get('candidatesTokenCount'))
 

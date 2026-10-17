@@ -3,7 +3,7 @@
 
   function layout(nodes, edges, sizes = {}) {
     const graph = new root.dagre.graphlib.Graph();
-    graph.setGraph({ rankdir: 'LR', ranker: 'network-simplex', nodesep: 32, ranksep: 96,
+    graph.setGraph({ rankdir: 'LR', ranker: 'network-simplex', nodesep: 56, edgesep: 32, ranksep: 150,
       marginx: 40, marginy: 40 });
     graph.setDefaultEdgeLabel(() => ({}));
     const ordered = [...nodes].sort((a, b) => (a.order_index || 0) - (b.order_index || 0)
@@ -45,10 +45,18 @@
       const box = graph.node(node.id), column = box.rank ?? Math.round(box.x);
       left.set(column, Math.min(left.get(column) ?? Infinity, box.x - box.width / 2));
     }
-    return Object.fromEntries(ordered.map(node => {
+    const positions = Object.fromEntries(ordered.map(node => {
       const box = graph.node(node.id);
       return [node.id, { x: Math.round(left.get(box.rank ?? Math.round(box.x))), y: Math.round(box.y - box.height / 2) }];
     }));
+    const routes = [];
+    for (const edge of graph.edges()) {
+      const points = graph.edge(edge).points;
+      if (points?.length) routes.push({ from: edge.v, to: edge.w, points: points.map(p => ({ x: Math.round(p.x), y: Math.round(p.y) })),
+        source: positions[edge.v], target: positions[edge.w] });
+    }
+    Object.defineProperty(positions, 'routes', { value: routes });
+    return positions;
   }
 
   root.TutorGraphLayout = { layout };

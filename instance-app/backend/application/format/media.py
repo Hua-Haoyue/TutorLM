@@ -83,6 +83,12 @@ def detect(
     """交叉判定格式；无法可靠判定即拒绝。"""
 
     ext = _extension(filename)
+    from backend.application.services.code_project import EXTENSIONS
+    if ext in EXTENSIONS:
+        if data.startswith((_PDF_MAGIC, *_ZIP_MAGIC)) or b'\x00' in data:
+            raise UnsupportedMedia('Binary payload cannot be imported as source code')
+        _require_decodable(data)
+        return MediaProbe(TXT, declared_mime, filename)
     ext_format = _EXT_TO_FORMAT.get(ext) if ext else None
     mime_format = _mime_format(declared_mime)
 

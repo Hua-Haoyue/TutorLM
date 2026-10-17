@@ -36,6 +36,31 @@ snapshot. Surviving descendants point to their nearest surviving ancestor in
 both the graph and explanation context. The controls appear only when the
 backend advertises the enabled plugin.
 
+## Code Projects And Workspace Chat
+
+The Code reader uses the self-hosted Highlight.js bundle in `assets/highlight/`
+and retains source selections. Imported source files can be edited with Tab
+identifier completion, indentation, Shift+Tab unindent and Enter auto-indent.
+Saving creates a document revision; replacement is refused while nodes reference
+that source. The ZIP import control creates a static cross-file index without
+running the imported project. PDF code retrieval defaults off.
+
+The Chat control beside the workspace menu opens a draggable, resizable panel.
+Its bounded server agent reads workspace data through allowlisted tools and
+proposes writes for explicit approval with revision checks. There is no code,
+shell, SQL or package execution tool. Preferences select reasoning effort,
+native web search and code context; unsupported provider controls are disabled.
+API details and safety limits are in `../../docs/workspace-tools.md`.
+
+Auto-layout retains Dagre's routed edge points for long dependencies instead of
+replacing every edge with a direct curve. Both enlargement and shrinking animate
+card dimensions while connectors follow each frame; reduced motion skips them.
+Complex graphs may still contain crossings.
+
+`scripts/browser-workspace-tools.cjs` covers code upload/editing, preference
+payloads, project evidence, zoom animation and desktop/mobile floating Chat
+against a disposable fake-provider backend.
+
 ## Local Development
 
 Start the backend from the repository root:

@@ -278,7 +278,9 @@ class RunManager:
         )
 
         try:
-            result = handler(ctx)
+            from backend.application.services.model_options import inference_options
+            with inference_options(ctx.payload):
+                result = handler(ctx)
         except CancelledRun:
             self.store.mark_run_state(
                 run_id,

@@ -10,6 +10,7 @@ its result, so a cancelled run never persists an answer.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Response
+from backend.domain.errors import NotFoundError
 
 from backend.host.state import AppState
 
@@ -45,7 +46,9 @@ def list_runs(
     session: dict = Depends(require_session),
     state: AppState = Depends(get_state),
 ) -> dict:
-    return {"items": state.services.list_runs()}
+    items = state.services.list_runs()
+    return {"items": [run for run in items if run['kind'] != 'workspace_chat'
+                      or (state.store.get_run(run['id']) or {}).get('session_id') == str(session['id'])]}
 
 
 @router.get("/runs/{run_id}")
@@ -54,6 +57,9 @@ def get_run(
     session: dict = Depends(require_session),
     state: AppState = Depends(get_state),
 ) -> dict:
+    row = state.store.get_run(run_id)
+    if row and row['kind'] == 'workspace_chat' and row['session_id'] != str(session['id']):
+        raise NotFoundError('Run not found')
     return state.services.get_run(run_id)
 
 
@@ -64,6 +70,9 @@ def cancel_run(
     state: AppState = Depends(get_state),
 ) -> dict:
     """Cancel a queued/running run. Its result is discarded, never committed."""
+    row = state.store.get_run(run_id)
+    if row and row['kind'] == 'workspace_chat' and row['session_id'] != str(session['id']):
+        raise NotFoundError('Run not found')
     return state.services.cancel_run(run_id)
 
 

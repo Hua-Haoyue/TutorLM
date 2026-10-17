@@ -124,6 +124,15 @@ class OpenAICompatibleProvider:
             "max_tokens": int(request.max_tokens or self._max_tokens),
             "temperature": 0,
         }
+        if self._model.startswith(('o1', 'o3', 'o4', 'gpt-5')) or request.reasoning_effort != 'auto':
+            if request.reasoning_effort != 'auto':
+                body['reasoning_effort'] = request.reasoning_effort
+                body['max_tokens'] = max(body['max_tokens'],
+                    {'low': 4096, 'medium': 8192, 'high': 16384}[request.reasoning_effort])
+            body['max_completion_tokens'] = body.pop('max_tokens')
+            body.pop('temperature', None)
+        if request.web_search:
+            body['web_search_options'] = {}
         if request.json_object:
             body['response_format'] = {'type': 'json_object'}
         return body
@@ -151,7 +160,9 @@ class OpenAICompatibleProvider:
             provider="openai_compatible",
             model=str(decoded.get("model") or self._model),
             payload={"kind": request.kind, "answer": text, "question": request.prompt,
-                     "finish_reason": first.get('finish_reason') if first.get('finish_reason') in {'stop', 'length', 'content_filter', 'tool_calls'} else None},
+                     "finish_reason": first.get('finish_reason') if first.get('finish_reason') in {'stop', 'length', 'content_filter', 'tool_calls'} else None,
+                     'sources': [a['url_citation'] for a in message.get('annotations', [])
+                                 if isinstance(a, dict) and isinstance(a.get('url_citation'), dict)]},
             prompt_tokens=_as_int(usage.get("prompt_tokens")),
             completion_tokens=_as_int(usage.get("completion_tokens")),
         )

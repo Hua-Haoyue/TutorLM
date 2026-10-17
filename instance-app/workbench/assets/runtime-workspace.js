@@ -90,7 +90,7 @@
      length / style / language use validated workflow fields when available;
      older backends still receive the legacy question hint. */
   const PREF_KEY = 'tlm.prefs';
-  const PREF_DEFAULT = { hl: '#F2D58A', follow: true, links: true, minimap: true, length: 'medium', style: 'auto', lang: 'auto', readFont: 'serif', pen: 'pen', inkColor: '#C2402F' };
+  const PREF_DEFAULT = { hl: '#F2D58A', follow: true, links: true, minimap: true, length: 'medium', style: 'auto', lang: 'auto', effort: 'auto', webSearch: false, codeContext: 'auto', readFont: 'serif', pen: 'pen', inkColor: '#C2402F' };
   const HL_COLORS = [['#F2D58A', '麦黄'], ['#F5B48C', '杏色'], ['#A8D5B5', '薄荷'], ['#A9C8EC', '天蓝'], ['#E8A9C3', '玫瑰'], ['#C8B6EA', '薰衣草']];
   const prefs = { ...PREF_DEFAULT, ...readJSON(PREF_KEY, {}) };
   const LENGTH_HINT = { short: '请用三句话以内简短回答', medium: '', long: '请详细回答，分点说明，并给出推导或例子' };
@@ -101,6 +101,11 @@
     const base = String(question || '').trim();
     if (!hint) return base.slice(0, 1000);
     return `${(base || '请解释这个知识点。').slice(0, 1000 - hint.length - 4)}\n（${hint}）`;
+  }
+  function modelOptions() {
+    const features = api.runtime?.model_features || {};
+    return { effort: features.effort && ['low', 'medium', 'high'].includes(prefs.effort) ? prefs.effort : 'auto',
+      web_search: !!features.web_search && !!prefs.webSearch };
   }
   function explanationInput(nodeId, question, responseMode) {
     const workflow = (api.runtime?.plugins || []).flatMap(plugin => plugin.workflows || [])
@@ -115,6 +120,9 @@
         style: Object.hasOwn(STYLE_HINT, prefs.style) ? prefs.style : 'auto',
         length: Object.hasOwn(LENGTH_HINT, prefs.length) ? prefs.length : 'medium',
         language: Object.hasOwn(LANG_HINT, prefs.lang) ? prefs.lang : 'auto',
+        ...(fields.preferences.properties?.model ? { model: modelOptions() } : {}),
+        ...(fields.preferences.properties?.code_context && prefs.codeContext !== 'auto'
+          ? { code_context: prefs.codeContext === 'on' } : {}),
       } } : {}),
     };
   }
@@ -150,6 +158,11 @@
           <div class="pref-row"><span>正文字号</span>${opt('docScale', [['0.9', '小'], ['1', '标准'], ['1.15', '大'], ['1.3', '特大']], String(Math.round(docScale * 100) / 100))}</div>
         </section>
         <section><h3>解释</h3>
+          <div class="pref-row"><span>思考强度</span><select class="input" data-model-pref="effort" aria-label="思考强度" ${api.runtime?.model_features?.effort ? '' : 'disabled'}>
+          ${[['auto', '自动'], ['low', '低'], ['medium', '中'], ['high', '高']].map(([v, label]) => `<option value="${v}" ${modelOptions().effort === v ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
+          <div class="pref-row"><span>联网搜索</span><input type="checkbox" data-model-pref="webSearch" aria-label="联网搜索" ${modelOptions().web_search ? 'checked' : ''} ${api.runtime?.model_features?.web_search ? '' : 'disabled'}></div>
+          <div class="pref-row"><span>项目代码检索</span><select class="input" data-model-pref="codeContext" aria-label="项目代码检索">
+          ${[['auto', '自动（代码开启）'], ['on', '开启'], ['off', '关闭']].map(([v, label]) => `<option value="${v}" ${prefs.codeContext === v ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
           <div class="pref-row"><span>长度</span>${opt('length', [['short', '简短'], ['medium', '适中'], ['long', '详细']], prefs.length)}</div>
           <div class="pref-row"><span>风格</span>${opt('style', [['auto', '默认'], ['plain', '通俗'], ['rigorous', '严谨'], ['example', '多举例'], ['analogy', '类比'], ['socratic', '引导式']], prefs.style)}</div>
           <div class="pref-row"><span>语言</span>${opt('lang', [['auto', '跟随原文'], ['zh', '中文'], ['en', 'English']], prefs.lang)}</div>
@@ -162,6 +175,10 @@
       actions: [{ label: '恢复默认', run: (c) => { Object.assign(prefs, PREF_DEFAULT); localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); applyPrefs(); drawConnector(); drawMinimap(); c(); toast('已恢复默认偏好'); } },
         { label: '完成', primary: true, run: (c) => c() }],
       onOpen: (root) => {
+        root.addEventListener('change', event => {
+          const key = event.target.dataset.modelPref;
+          if (key) setPref(key, event.target.type === 'checkbox' ? event.target.checked : event.target.value);
+        });
         root.addEventListener('click', (e) => {
           const b = e.target.closest('[data-pref] [data-val]');
           if (b) {
@@ -294,6 +311,18 @@
         <div style="display:flex;gap:8px"><button class="btn" data-act="import">${icon('upload')}导入文件</button><button class="btn btn--ghost" data-act="new-file">新建文档</button></div></div>`;
       updateStatus(); drawConnector();
       return;
+    }
+    if (S.mode === 'code') {
+      sheet.innerHTML = docHead(S.doc) + '<div id="code-content"></div>';
+      TutorCode.mount($('#code-content', sheet), { doc: S.doc, text: S.text, error: fail,
+        save: async text => {
+          const value = await api.request('/api/code/file', { method: 'PUT', body: {
+            path: S.doc.code_path || S.doc.source_filename || S.doc.title, text,
+            expected_revision: S.doc.current_revision_id,
+          } });
+          await afterDocChange(value.document.id);
+        } });
+      applyMarks(); updateStatus(); drawConnector(); return;
     }
     if (pdfv && !pdfv.key.startsWith(S.doc.id + ':')) { pdfv.view.destroy().catch(() => {}); pdfv = null; }
     if (isPdfView()) {
@@ -1010,7 +1039,7 @@
       // Flush start geometry before changing positions so even a fresh graph animates.
       void world.offsetWidth;
       pool.forEach((n) => {
-        n.metadata = { ...meta(n), position: target[n.id] };
+        n.metadata = { ...meta(n), position: target[n.id], layout_routes: (target.routes || []).filter(route => route.from === n.id) };
         const el = elOf(n); if (el) { el.style.left = target[n.id].x + 'px'; el.style.top = target[n.id].y + 'px'; }
       });
       await new Promise(resolve => {
@@ -1034,7 +1063,6 @@
       if (beforeLayout && current()) layoutPlugin.afterAutoLayout(beforeLayout, pool);
       if (!silent && current()) toast('已从根到叶排列并保存布局');
     } finally {
-      layoutPlugin?.endAutoLayout();
       world.classList.remove('animate'); layoutBusy = false;
       if (button) { button.disabled = false; button.removeAttribute('aria-busy'); }
       layoutPlugin?.endAutoLayout();
@@ -1048,7 +1076,8 @@
   function edgeList() {
     const list = [], tree = new Set();
     docNodes().forEach((n) => {
-      const parent = n.parent_id && nodeOf(n.parent_id);
+      const parentId = meta(n).source?.fromNode || n.parent_id;
+      const parent = parentId && nodeOf(parentId);
       if (inDoc(parent)) { tree.add(parent.id + '>' + n.id); list.push({ a: parent, b: n, rel: null }); }
     });
     S.edges.forEach((e) => {
@@ -1070,7 +1099,7 @@
       if (!A || !B) return;
       e.A = A; e.B = B;
       e.dir = B.x >= A.x + A.w ? 1 : B.x + B.w <= A.x ? -1 : 0;
-      e.vertical = B.y >= A.y + A.h ? 1 : B.y + B.h <= A.y ? -1 : 0;
+      e.vertical = e.dir ? 0 : B.y >= A.y + A.h ? 1 : B.y + B.h <= A.y ? -1 : 0;
       (outs[e.a.id + (e.vertical ? e.vertical === 1 ? 'B' : 'T' : e.dir === -1 ? 'L' : 'R')] ||= []).push(e);
       (ins[e.b.id + (e.vertical ? e.vertical === 1 ? 'T' : 'B' : e.dir === 1 ? 'L' : 'R')] ||= []).push(e);
       list.push(e);
@@ -1103,14 +1132,44 @@
       const dx = dir === 0 ? 48 : Math.max(36, Math.abs(x2 - x1) / 2) * dir;
       const c2 = dir === 0 ? x2 + 48 : x2 - dx;
       const dy = Math.max(30, Math.abs(e.y2 - e.y1) / 2) * e.vertical;
-      const d = e.vertical
+      let labelX = (x1 + x2) / 2 + (!e.vertical && dir === 0 ? 40 : 0), labelY = (e.y1 + e.y2) / 2 - 4;
+      let d = e.vertical
         ? `M${x1} ${e.y1} C${x1} ${e.y1 + dy}, ${x2} ${e.y2 - dy}, ${x2} ${e.y2}`
         : `M${x1} ${e.y1} C${x1 + dx} ${e.y1}, ${c2} ${e.y2}, ${x2} ${e.y2}`;
+      const safeRoutes = node => Array.isArray(meta(node).layout_routes) ? meta(node).layout_routes.filter(route =>
+        route && Array.isArray(route.points) && route.points.length >= 2 && route.points.length <= 100
+        && [route.source, route.target, ...route.points].every(p => p && Number.isFinite(p.x) && Number.isFinite(p.y))) : [];
+      const forward = safeRoutes(e.a).find(route => route.to === e.b.id);
+      const backward = safeRoutes(e.b).find(route => route.to === e.a.id);
+      const routed = forward || backward;
+      if (routed) {
+        const first = forward ? A : B, last = forward ? B : A;
+        const stillPlaced = Math.abs(first.x - routed.source.x) < 2 && Math.abs(first.y - routed.source.y) < 2
+          && Math.abs(last.x - routed.target.x) < 2 && Math.abs(last.y - routed.target.y) < 2;
+        if (stillPlaced && routed.points.length > 1) {
+          const points = routed.points.map(p => ({...p}));
+          points[0] = { x: first.x + first.w, y: Math.max(first.y + 12, Math.min(first.y + first.h - 12, points[0].y)) };
+          points[points.length - 1] = { x: last.x, y: Math.max(last.y + 12, Math.min(last.y + last.h - 12, points.at(-1).y)) };
+          if (backward) points.reverse();
+          d = points.map((point, index) => `${index ? 'L' : 'M'}${point.x} ${point.y}`).join(' ');
+          const lengths = points.slice(1).map((p, i) => Math.hypot(p.x - points[i].x, p.y - points[i].y));
+          let remaining = lengths.reduce((sum, length) => sum + length, 0) / 2;
+          for (let i = 0; i < lengths.length; i++) {
+            if (remaining <= lengths[i]) {
+              const fraction = lengths[i] ? remaining / lengths[i] : 0;
+              labelX = points[i].x + (points[i + 1].x - points[i].x) * fraction;
+              labelY = points[i].y + (points[i + 1].y - points[i].y) * fraction - 4;
+              break;
+            }
+            remaining -= lengths[i];
+          }
+        }
+      }
       const on = S.selected && (e.a.id === S.selected || e.b.id === S.selected);
       if (!e.rel) return `<path class="${on ? 'on' : ''}" marker-end="url(#arrow)" d="${d}"/>`;
       const label = esc(REL[e.rel] || e.rel);
       return `<path class="rel ${on ? 'on' : ''}" marker-end="url(#arrow)" d="${d}"><title>${label}</title></path>
-        <text class="rel-label" x="${(x1 + x2) / 2 + (!e.vertical && dir === 0 ? 40 : 0)}" y="${(e.y1 + e.y2) / 2 - 4}" text-anchor="middle">${label}</text>`;
+        <text class="rel-label" x="${labelX}" y="${labelY}" text-anchor="middle">${label}</text>`;
     });
     $('#edge-g').innerHTML = parts.join('');
   }
@@ -2562,6 +2621,7 @@
     return read();
   }
   async function openDocument(id) {
+    if (window.TutorCode?.dirty() && !confirm('代码尚未保存，放弃修改？')) return;
     irEditor.finish();
     if (S.doc && S.doc.id !== id) await irFlush();
     const current = ++revision;
@@ -2579,7 +2639,7 @@
     if (S.doc && S.doc.id !== id) S.views[S.doc.id] = { ...S.view };
     S.doc = doc; S.text = text; S.textVersion = textVersion;
     // View mode is remembered per document; a PDF opens in the real PDF view.
-    S.mode = ['md', 'raw', 'pdf'].includes(S.modes[doc.id]) ? S.modes[doc.id] : doc.format === 'pdf' ? 'pdf' : 'md';
+    S.mode = ['md', 'raw', 'pdf', 'code'].includes(S.modes[doc.id]) ? S.modes[doc.id] : doc.code_path ? 'code' : doc.format === 'pdf' ? 'pdf' : 'md';
     if (S.selected && !inDoc(nodeOf(S.selected))) S.selected = null;
     const saved = S.views[S.doc.id];
     S.view = saved && Number.isFinite(saved.z) ? { ...saved } : { x: 16, y: 8, z: 0.85 };
@@ -2593,7 +2653,7 @@
   }
   async function importFiles(files) {
     const max = api.limits?.max_bytes_per_file || 2 * 1024 * 1024;
-    const ok = [...files].filter((f) => /\.(md|markdown|txt|pdf|tex|zip)$/i.test(f.name));
+    const ok = [...files].filter((f) => /\.(md|markdown|txt|pdf|tex|zip)$/i.test(f.name) || window.TutorCode?.supported(f.name));
     if (!ok.length) { toast('只支持 .md / .txt / .pdf / .tex（或 TeX 工程 .zip）文件'); return; }
     if (ok.length < files.length) toast(`已跳过 ${files.length - ok.length} 个不支持的文件`);
     let last = null;
@@ -2900,7 +2960,9 @@
     if (t === 'draw') { hideAsk(); hideSelBar(); getSelection().removeAllRanges(); paintDrawbar(); paintInk(); }
     if (t === 'highlight') toast('高亮模式：选中文字即高亮（仅保存在本浏览器），点击已有高亮可移除');
   }
-  function setView(v) { if (!S.doc) return; S.mode = v; S.modes[S.doc.id] = v; savePrefs(); renderReader(); }
+  function setView(v) { if (!S.doc) return; if (v === 'code' && !TEXT_FORMATS.has(S.doc.format)) { toast('Code 视图仅支持文本文件'); return; }
+    if (window.TutorCode?.dirty() && !confirm('代码尚未保存，放弃修改？')) return;
+    S.mode = v; S.modes[S.doc.id] = v; savePrefs(); renderReader(); }
 
   async function endTrial() {
     const local = api.runtime?.mode === 'local' && !api.managed;
@@ -3291,7 +3353,10 @@
     }
     await start();
   }
-  window.TLM_WS = { get state() { return S; }, select: (id) => selectNode(id, { center: true }), splitAnswer }; // test/debug hook
+  window.TLM_WS = { get state() { return S; }, select: (id) => selectNode(id, { center: true }), splitAnswer,
+    modelOptions,
+    refresh: async () => { if (S.doc) await afterDocChange(S.doc.id); else await loadProjects(); },
+    openDocument }; // test/debug hook
   if (document.fonts?.ready) document.fonts.ready.then(() => { drawEdges(); drawConnector(); updateStatus(); });
   boot().catch(fail);
 })();

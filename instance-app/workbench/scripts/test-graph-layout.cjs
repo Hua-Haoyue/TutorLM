@@ -81,3 +81,24 @@ test('empty graphs and the 80-node preview limit are supported', () => {
   const nodes = Array.from({ length: 80 }, (_, i) => node('n' + i, i ? 'n' + Math.floor((i - 1) / 2) : null, i));
   nonoverlapping(nodes, layout(nodes, []));
 });
+
+test('layout exposes engine routes instead of discarding long-edge crossing reduction', () => {
+  const nodes = [node('root'), node('a','root',1), node('b','root',2), node('leaf','a',3)];
+  const p = layout(nodes, [edge('long','root','leaf')]);
+  assert(p.routes.length >= 4);
+  const route = p.routes.find(route => route.from === 'root' && route.to === 'leaf');
+  assert(route.points.length >= 3);
+  assert(route.points.every(point => Number.isFinite(point.x) && Number.isFinite(point.y)));
+  assert.equal(JSON.stringify(p).includes('routes'), false, 'Position persistence remains backward compatible');
+  for (const routed of p.routes) for (let i = 1; i < routed.points.length; i++) {
+    const a = routed.points[i - 1], b = routed.points[i];
+    for (const other of nodes.filter(n => n.id !== routed.from && n.id !== routed.to)) {
+      const rect = p[other.id];
+      for (let step = 0; step <= 100; step++) {
+        const x = a.x + (b.x - a.x) * step / 100, y = a.y + (b.y - a.y) * step / 100;
+        assert(!(x > rect.x && x < rect.x + 332 && y > rect.y && y < rect.y + 150),
+          `Routed edge must avoid unrelated card ${other.id}`);
+      }
+    }
+  }
+});

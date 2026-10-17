@@ -11,11 +11,13 @@ from backend.domain.narration import build_segments
 from backend.plugin_contracts import Draft, PanelDeclaration, PluginManifest, WorkflowDeclaration, WorkflowInput
 from backend.plugin_contracts.validation import checkpoint
 from backend.application.services import retelling_service
+from backend.application.services.model_options import MODEL_OPTIONS_SCHEMA
 
 MAX_RUN_NODES = 10
 INPUT_SCHEMA = {
     "type": "object", "required": ["project_id"], "additionalProperties": False,
     "properties": {
+        "model": MODEL_OPTIONS_SCHEMA,
         "project_id": {"type": "string", "minLength": 1, "maxLength": 128},
         "node_ids": {"type": ["array", "null"], "maxItems": MAX_RUN_NODES,
                      "items": {"type": "string", "minLength": 1, "maxLength": 128}},
@@ -92,7 +94,7 @@ MANIFEST = PluginManifest.build(
         WorkflowDeclaration(
             id="retelling.v1", kind="retelling", title="回讲父节点",
             input_schema={"type": "object", "required": ["node_id"], "additionalProperties": False,
-                          "properties": {"node_id": {"type": "string", "minLength": 1, "maxLength": 128}}},
+                          "properties": {"node_id": {"type": "string", "minLength": 1, "maxLength": 128}, "model": MODEL_OPTIONS_SCHEMA}},
             required_capabilities=["knowledge.read", "knowledge.write", "models.generate"],
         ),
     ],

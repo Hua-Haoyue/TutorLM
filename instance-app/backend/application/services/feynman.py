@@ -120,7 +120,7 @@ class FeynmanService:
         return result
 
     def validate_input(self, payload):
-        if set(payload) - {'node_id', 'explanation_id', 'previous_id'} or any(
+        if set(payload) - {'node_id', 'explanation_id', 'previous_id', 'model'} or any(
             not isinstance(payload.get(k), str) or not payload[k] for k in ('node_id', 'explanation_id')):
             raise Unprocessable('Invalid Feynman input')
         if 'previous_id' in payload and (not isinstance(payload['previous_id'], str) or not payload['previous_id']):

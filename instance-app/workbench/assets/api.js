@@ -260,6 +260,9 @@
   }
   /* Submit a Host run and poll it to a terminal state (the server does not stream deltas). */
   async function run(kind, input, { onRun = () => {}, signal, key = requestKey() } = {}) {
+    const workflow = runtime?.plugins?.flatMap(plugin => plugin.workflows || []).find(workflow => workflow.kind === kind);
+    const model = window.TLM_WS?.modelOptions?.();
+    if (model && !input.model && (workflow?.input_schema?.properties?.model || (kind === 'feynman' && runtime.workspace_agent))) input = { ...input, model };
     let value = await post('/api/runs', { kind, input }, { signal, headers: { 'Idempotency-Key': key } });
     onRun(value);
     return follow(value, { onRun, signal });
@@ -280,6 +283,7 @@
   }
 
   window.RuntimeAPI = {
+    request,
     ApiError, TERMINAL, get, post, patch, put, del, part, bytes, run, follow, connect, enter, release, detect,
     currentLease, requestLease, waitLeaseActive, secondsLeft, loadSession, redeemShare,
     accessPolicy, ensureUser, login, listWorkspaces, createWorkspace, createShare, revokeShare,

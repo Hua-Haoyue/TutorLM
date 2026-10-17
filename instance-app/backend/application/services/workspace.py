@@ -103,6 +103,20 @@ class ExplanationService:
         if not allow_diagnostic:
             context['response_mode'] = 'expand'
         language = context['explanation_preferences']['language']
+        prefs = context['explanation_preferences']
+        options = prefs.get('model', {})
+        features = getattr(self._app.provider, 'model_features', lambda: {'effort': False, 'web_search': False})()
+        if options.get('effort', 'auto') != 'auto' and not features['effort']:
+            raise InvalidInputError('Current model does not support configurable thinking')
+        if node.document_id:
+            document = self._app.require_document(node.document_id)
+            extra = json.loads(document.get('extra_json') or '{}')
+            use_code = prefs.get('code_context', bool(extra.get('code_path')))
+            if use_code:
+                query = question + ' ' + node.title + ' ' + (node.content or '')[:1000]
+                context['project_code'] = self._app.agent.code.search(query)
+        if options.get('web_search'):
+            context['web_evidence'] = self._app.provider.research(question + ' ' + node.title, options)
         request = ExplanationRequest(node=node, question=question,
                                      language='zh' if language == 'auto' else language, learning_context=context)
         try:
@@ -117,6 +131,10 @@ class ExplanationService:
             key: context[key] for key in ('source_status', 'document_revision_id',
                                          'explanation_depth', 'explanation_policy',
                                          'explanation_preferences') if key in context}}
+        if context.get('project_code'):
+            explanation.learning['code_citations'] = context['project_code']
+        if context.get('web_evidence'):
+            explanation.learning['web_sources'] = context['web_evidence']['sources']
         if context.get('parent'):
             explanation.learning['context']['parent_explanation_id'] = context['parent']['explanation_id']
         return explanation
