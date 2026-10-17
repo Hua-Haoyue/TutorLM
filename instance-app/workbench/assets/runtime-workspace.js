@@ -2199,8 +2199,9 @@
     } else {
       body = `<p class="muted insp-empty" style="margin:0;padding:10px 12px;font-size:12px">${total ? '点击节点查看详情；拖动空白处平移画布。' : '还没有节点。'}</p>`;
     }
-    const canNarrate = S.kinds.has('narration') && total > 0;
-    inspector.innerHTML = head + body + narrationPanel() + `<div class="inspector__cta"><button class="btn btn--primary" data-act="narrate" ${canNarrate ? '' : 'disabled'} title="${S.kinds.has('narration') ? '' : '当前镜像未启用串讲工作流'}">${icon('narrate')}生成串讲</button></div>`;
+    const hasNarration = documentNarrations().length > 0;
+    const canNarrate = S.kinds.has('narration') && total > 0 && !narrationPending.has(S.doc?.id);
+    inspector.innerHTML = head + body + narrationPanel() + `<div class="inspector__cta"><button class="btn btn--primary" data-act="${hasNarration ? 'narration-regenerate' : 'narrate'}" ${canNarrate ? '' : 'disabled'} title="${S.kinds.has('narration') ? '' : '当前镜像未启用串讲工作流'}">${icon(hasNarration ? 'redo' : 'narrate')}${hasNarration ? '重新生成' : '生成串讲'}</button></div>`;
   }
   inspector.addEventListener('click', action(async (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
@@ -2282,8 +2283,7 @@
     return `<section class="inspector__narration" aria-label="已保存串讲" style="border-top:1px solid var(--line-soft);padding:10px 12px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
         <span class="label">串讲</span>
-        <button class="btn btn--sm" data-act="narration-regenerate" ${narrationPending.has(S.doc?.id) ? 'disabled' : ''} aria-label="重新生成串讲" title="${narrationPending.has(S.doc?.id) ? '生成中' : '重新生成'}" style="margin-left:auto;flex-shrink:0">${icon('redo')}重新生成</button>
-        <span class="pager" role="group" aria-label="串讲版本">
+        <span class="pager" role="group" aria-label="串讲版本" style="white-space:nowrap;flex-shrink:0">
           <button class="icon-btn" data-act="narration-prev" ${index <= 0 ? 'disabled' : ''} aria-label="上一版串讲" title="上一版串讲">${icon('chev-l')}</button>
           <span>${index + 1} / ${pages.length}</span>
           <button class="icon-btn" data-act="narration-next" ${index >= pages.length - 1 ? 'disabled' : ''} aria-label="下一版串讲" title="下一版串讲">${icon('chev-r')}</button>
