@@ -1640,6 +1640,69 @@
     await sync(api.put('/api/learning/profile', { expected_revision: profile.revision, profile: { education_stage: stage } }));
     return true;
   }
+  let relationsBusy = false;
+  async function organizeRelations() {
+    if (relationsBusy) return;
+    if (!S.doc || S.nodes.filter(inDoc).length < 2) throw new Error('当前文档至少需要两个节点才能梳理关系');
+    const projectId = S.project.id, documentId = S.doc.id;
+    const button = $('[data-act="ai-relations"]');
+    relationsBusy = true;
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    let runId;
+    const pending = modal({ title: 'AI 梳理关系', body: '<p role="status">正在梳理…</p>',
+      actions: [{ label: '取消', run: (close) => { close(); if (runId) api.cancel(runId).catch(fail); } }] });
+    try {
+      const result = await api.run('graph_relations', { document_id: documentId }, { onRun: (run) => {
+        runId = run.id;
+        if (!pending.root.isConnected && !api.TERMINAL.has(run.state)) api.cancel(run.id).catch(() => {});
+      } });
+      if (!pending.root.isConnected) return;
+      pending.close();
+      if (S.project?.id !== projectId || S.doc?.id !== documentId) return;
+      const suggestions = result.suggestions || [];
+      const name = (id) => nodeOf(id)?.title || id;
+      const relation = (item) => `<span>${esc(name(item.source_node_id))}</span><span class="relation-review__arrow"> → ${esc(REL[item.relation] || item.relation)} → </span><span>${esc(name(item.target_node_id))}</span>`;
+      modal({ title: suggestions.length ? `关系建议 · ${suggestions.length} 项` : '关系梳理完成', wide: true,
+        body: suggestions.length ? `<div class="relation-review">${suggestions.map((s) => `<label class="relation-review__item">
+          <input type="checkbox" value="${esc(s.id)}" checked>
+          <span class="relation-review__content"><strong>${esc({ add: '新增', update: '调整', remove: '移除' }[s.action])}</strong>
+          ${s.previous ? `<span class="relation-review__before">${relation(s.previous)}</span>` : ''}
+          ${s.action !== 'remove' ? `<span class="relation-review__after">${relation(s)}</span>` : ''}
+          <span class="muted">${esc(s.reason)}</span></span></label>`).join('')}</div>` : '<p>当前关系无需调整。</p>',
+        actions: [ { label: suggestions.length ? '保留原连线' : '完成', run: (close) => close() },
+          ...(suggestions.length ? [{ label: '保留选中建议', primary: true, id: 'apply-relations', run: async (close, root, applyButton) => {
+            const ids = $$('input[type="checkbox"]:checked', root).map((c) => c.value);
+            if (!ids.length) return;
+            if (S.project?.id !== projectId || S.doc?.id !== documentId) throw new Error('当前文档已切换，请重新梳理');
+            applyButton.disabled = true;
+            try {
+              const applied = await sync(api.post(`/api/projects/${api.part(projectId)}/graph/relations/apply`, { run_id: runId, suggestion_ids: ids }));
+              if (root.isConnected) close();
+              if (S.project?.id === projectId) await refreshGraph();
+              toast(`已保留 ${applied.applied} 项关系建议`);
+            } catch (err) {
+              if (err.status === 409) {
+                if (root.isConnected) close();
+                await refreshGraph();
+              }
+              throw err;
+            } finally { applyButton.disabled = false; }
+          } }] : []) ],
+        onOpen: (root) => {
+          const update = () => { const b = $('#apply-relations', root); if (b) b.disabled = !root.querySelector('input:checked'); };
+          root.addEventListener('change', update);
+        },
+      });
+    } catch (err) {
+      if (pending.root.isConnected) { pending.close(); throw err; }
+    } finally {
+      relationsBusy = false;
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+    }
+  }
+
   async function retell(n) {
     if (running(n.id)) throw new Error('这个节点正在生成，请稍候');
     if (!(await ensureProfile())) return;
@@ -2533,7 +2596,7 @@
     'zoom-in': () => zoomAt(...surfaceCenter(), S.view.z * 1.2),
     'zoom-out': () => zoomAt(...surfaceCenter(), S.view.z / 1.2),
     'zoom-reset': () => zoomAt(...surfaceCenter(), 1),
-    'fit': fitView, 'auto-layout': autoLayout,
+    'fit': fitView, 'auto-layout': autoLayout, 'ai-relations': organizeRelations,
     'toggle-explorer': () => togglePane('no-explorer', 'toggle-explorer'),
     'toggle-canvas': () => togglePane('no-canvas', 'toggle-canvas'),
     'toggle-follow': () => { setPref('follow', !prefs.follow); toast(prefs.follow ? '知识图将跟随阅读区滚动' : '已关闭跟随滚动'); },

@@ -33,6 +33,17 @@ class ExplanationWorkflow:
             model=entity.model, artifact_type="explanation",
         )
 
+class GraphRelationsWorkflow:
+    id = 'graph_relations.v1'
+    kind = 'graph_relations'
+
+    def run(self, context: Any, data: WorkflowInput) -> Draft:
+        checkpoint(context)
+        result = context.container.context.graph_relations.preview(data.get('document_id'))
+        checkpoint(context)
+        return Draft(result=result)
+
+
 MANIFEST = PluginManifest.build(
     "explanations",
     "0.1.0",
@@ -56,7 +67,13 @@ MANIFEST = PluginManifest.build(
             title="解释节点",
             input_schema=INPUT_SCHEMA,
             required_capabilities=["knowledge.write", "models.generate"],
-        )
+        ),
+        WorkflowDeclaration(
+            id='graph_relations.v1', kind='graph_relations', title='AI 梳理关系',
+            input_schema={'type': 'object', 'required': ['document_id'], 'additionalProperties': False,
+                          'properties': {'document_id': {'type': 'string', 'minLength': 1, 'maxLength': 128}}},
+            required_capabilities=['knowledge.edges.read', 'models.generate'],
+        ),
     ],
     panels=[PanelDeclaration(id="explanation", title="解释", slot="right", order=20)],
 )
@@ -67,7 +84,8 @@ class ExplanationsPlugin:
 
     def __init__(self) -> None:
         workflow = ExplanationWorkflow()
-        self.workflows = {workflow.id: workflow}
+        graph = GraphRelationsWorkflow()
+        self.workflows = {workflow.id: workflow, graph.id: graph}
 
     def register_services(self, host: Any) -> None:  # pragma: no cover - no-op
         return None

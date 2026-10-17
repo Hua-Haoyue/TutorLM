@@ -1,0 +1,7 @@
+.relation-review { display: grid; gap: 0; }
+.relation-review__item { display: flex; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--border, #d9dde2); cursor: pointer; align-items: flex-start; }
+.relation-review__item input { flex: 0 0 16px; width: 16px; height: 16px; margin-top: 3px; }
+.relation-review__content { display: grid; gap: 7px; min-width: 0; overflow-wrap: anywhere; font-size: 13px; line-height: 1.6; }
+.relation-review__before { color: var(--text-muted, #6b7280); text-decoration: line-through; }
+.relation-review__after { color: var(--text, #20242b); }
+.relation-review__arrow { color: var(--text-muted, #6b7280); }

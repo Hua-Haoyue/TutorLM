@@ -73,6 +73,11 @@ class EdgeCreate(StrictModel):
 
 
 # -- runs ----------------------------------------------------------------
+class GraphRelationsApply(StrictModel):
+    run_id: str = Field(min_length=1, max_length=128)
+    suggestion_ids: list[str] = Field(min_length=1, max_length=12)
+
+
 class RunCreate(StrictModel):
     kind: str
     input: dict[str, Any] = Field(default_factory=dict)

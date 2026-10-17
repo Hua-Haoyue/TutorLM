@@ -40,7 +40,7 @@ def test_builtin_sdk_discovery(client):
     assert registry.workflow('retelling').declaration.id == 'retelling.v1'
     public = client.get('/api/plugins').json()
     assert public['count'] == 3
-    assert {item['kind'] for item in public['workflows']} == {'explanation', 'narration', 'retelling'}
+    assert {item['kind'] for item in public['workflows']} == {'explanation', 'narration', 'retelling', 'graph_relations'}
     assert public['host_api_version'] == 1
 
 
@@ -171,7 +171,8 @@ def test_publication_requires_write_capability(client, session_headers, project_
     entry = state.plugins.get('explanations')
     # Trusted plugins are not sandboxed; even a misbehaving read-only plugin
     # cannot accidentally publish an entity through the Host commit interface.
-    entry.manifest = replace(entry.manifest, capabilities=(), workflows=(replace(entry.manifest.workflows[0], required_capabilities=()),))
+    entry.manifest = replace(entry.manifest, capabilities=(), workflows=tuple(
+        replace(workflow, required_capabilities=()) for workflow in entry.manifest.workflows))
     workflow = entry.instance.workflows['explanation.v1']
     monkeypatch.setattr(workflow, 'run', lambda context, data: Draft(
         entity=Explanation.create(project_id=project_id, node_id=target, question='Q', answer='A', provider='fake', model='test'),

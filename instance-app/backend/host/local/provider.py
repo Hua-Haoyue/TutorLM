@@ -45,6 +45,9 @@ class FakeProvider:
             'closure': 'Return to ' + request.parent_title,
         }, ensure_ascii=False)
 
+    def organize_relations(self, payload):
+        return json.dumps({'suggestions': []})
+
     def close(self):
         pass
 
@@ -64,10 +67,10 @@ class OpenAIProvider:
     def describe(self):
         return {'name': self.name, 'model': self.model}
 
-    def _generate(self, kind, prompt, system, *, json_object=False, json_schema=None):
+    def _generate(self, kind, prompt, system, *, json_object=False, json_schema=None, max_tokens=None):
         return self._provider.generate(GenerateRequest(
             kind=kind, prompt=prompt, system=system,
-            max_tokens=self.max_tokens, timeout_seconds=self.timeout_seconds,
+            max_tokens=max_tokens or self.max_tokens, timeout_seconds=self.timeout_seconds,
             json_object=json_object,
             json_schema=json_schema,
         )).text
@@ -80,6 +83,11 @@ class OpenAIProvider:
             'language': request.language, 'learning_context': request.learning_context,
         }, ensure_ascii=False), system, json_object=(request.learning_context or {}).get('strategy_version') == STRATEGY,
             json_schema=OUTPUT_SCHEMA if (request.learning_context or {}).get('strategy_version') == STRATEGY else None)
+
+    def organize_relations(self, payload):
+        from backend.application.services.graph_relations import OUTPUT_SCHEMA, SYSTEM
+        return self._generate('graph_relations', json.dumps(payload, ensure_ascii=False), SYSTEM,
+                              json_object=True, json_schema=OUTPUT_SCHEMA, max_tokens=max(4096, self.max_tokens))
 
     def narrate(self, request):
         raw = self._generate('narration', json.dumps({

@@ -89,3 +89,6 @@ class ModelProvider(Protocol):
     def retell(self, request: RetellRequest) -> str:
         """Return structured retelling JSON; the workflow validates its shape."""
 
+    def organize_relations(self, payload: dict) -> str:
+        """Propose relationship changes without modifying the graph."""
+
