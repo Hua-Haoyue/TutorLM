@@ -183,7 +183,7 @@
     /* A plain click (no text selected) on a block starts editing it. */
     opts.sheet.addEventListener('click', (e) => {
       if (e.defaultPrevented || !opts.enabled() || !getSelection().isCollapsed) return;
-      if (e.target.closest('mark.anchor, a, input, button, textarea, .ir-edit')) return;
+      if (e.target.closest('mark.anchor, a, input, button, textarea, .ir-edit, [data-math-source]')) return;
       const block = editableBlock(e.target);
       if (block) begin(block, e.clientX, e.clientY);
     });

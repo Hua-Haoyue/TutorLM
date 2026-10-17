@@ -71,7 +71,7 @@ function projectFixture(managed) {
     prefKey: () => 'view', hlKey: () => 'hl', readJSON: (key, fallback) => fallback,
     $: selector => selector === '#ws-name' ? name : usage,
     T: { sel: new Set() }, closeFind() {}, hideAsk() {},
-    async refreshDocs() {}, async loadHistory() {}, async refreshGraph() {},
+    async refreshDocs() {}, async loadHistory() {}, async loadNarrations() {}, async refreshGraph() {},
     docOf() {}, renderTree() {}, renderReader() {},
   };
   const start = source.indexOf('  async function openProject(id)');

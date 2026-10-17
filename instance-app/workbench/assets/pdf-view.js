@@ -144,14 +144,26 @@ export async function openPdfView(container, { data, ref, root, width, pixelScal
     numPages: info.num_pages,
     pages: pages.map((p) => ({ n: p.n, el: p.el })),
     container,
+    async cropSelection(selector) {
+      if (selector?.pages?.length !== 1) throw new Error('请在同一页内选择公式');
+      const anchor = selector.pages[0], page = pages[anchor.page - 1];
+      if (!page || !anchor.rects?.length) throw new Error('PDF 选区不可用，请重新选择');
+      const bounds = page.el.getBoundingClientRect(), rects = anchor.rects.map(rect => toPageRect(page, rect));
+      const left = Math.min(...rects.map(rect => rect.x)), top = Math.min(...rects.map(rect => rect.y));
+      const right = Math.max(...rects.map(rect => rect.x + rect.w)), bottom = Math.max(...rects.map(rect => rect.y + rect.h));
+      return view.crop(anchor.page, { left: bounds.left + left * bounds.width - 2, top: bounds.top + top * bounds.height - 2,
+        width: (right - left) * bounds.width + 4, height: (bottom - top) * bounds.height + 4 });
+    },
     async crop(n, rect) {
       const p = pages[n - 1];
       if (!p) throw new Error('PDF page unavailable');
       await render(p);
       if (!p.textLayer) throw new Error('PDF page has not finished rendering');
       const bounds = p.el.getBoundingClientRect();
-      const f = { x: clamp01((rect.left - bounds.left) / bounds.width), y: clamp01((rect.top - bounds.top) / bounds.height),
-        w: clamp01(rect.width / bounds.width), h: clamp01(rect.height / bounds.height) };
+      const x = clamp01((rect.left - bounds.left) / bounds.width), y = clamp01((rect.top - bounds.top) / bounds.height);
+      const f = { x, y, w: Math.max(0, clamp01((rect.left + rect.width - bounds.left) / bounds.width) - x),
+        h: Math.max(0, clamp01((rect.top + rect.height - bounds.top) / bounds.height) - y) };
+      if (!f.w || !f.h) throw new Error('PDF 选区为空，请重新选择');
       const source = p.el.querySelector('canvas'), canvas = document.createElement('canvas');
       const scale = Math.min(1, 2400 / Math.max(source.width * f.w, source.height * f.h));
       canvas.width = Math.max(1, Math.round(source.width * f.w * scale)); canvas.height = Math.max(1, Math.round(source.height * f.h * scale));
