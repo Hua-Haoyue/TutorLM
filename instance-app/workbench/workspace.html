@@ -25,6 +25,7 @@
 <link rel="stylesheet" href="assets/reader-pdf.css">
 <link rel="stylesheet" href="assets/katex/katex.min.css">
 <link rel="stylesheet" href="assets/obstacles.css?v=obstacles-20261017-r2">
+<link rel="stylesheet" href="assets/graph-relations.css?v=relations-20261017-r1">
 </head>
 <body>
 <div class="app" id="app">
@@ -170,6 +171,7 @@
       <span class="vsep"></span>
       <button class="icon-btn" data-act="fit" title="适应画布"><svg class="ic"><use href="#i-fit"/></svg></button>
       <button class="icon-btn" data-act="auto-layout" title="按依赖层级自动排列"><svg class="ic"><use href="#i-layout"/></svg></button>
+      <button class="icon-btn" data-act="ai-relations" aria-label="AI 梳理关系" title="AI 梳理关系"><svg class="ic"><use href="#i-sparkle"/></svg></button>
       <span class="vsep"></span>
       <button class="icon-btn" data-act="toggle-follow" id="follow-btn" aria-pressed="true" title="跟随阅读区滚动"><svg class="ic"><use href="#i-follow"/></svg></button>
       <div class="toolbar__right"><span class="chip" id="graph-count">0 节点</span></div>
@@ -251,6 +253,8 @@
 <script src="assets/katex/katex.min.js"></script>
 <script src="assets/markdown-it/markdown-it.min.js"></script>
 <script src="assets/markdown.js"></script>
-<script src="assets/runtime-workspace.js?v=obstacles-20261017-r2"></script>
+<script src="assets/dagre/dagre.min.js"></script>
+<script src="assets/graph-layout.js"></script>
+<script src="assets/runtime-workspace.js?v=relations-20261017-r1"></script>
 </body>
 </html>

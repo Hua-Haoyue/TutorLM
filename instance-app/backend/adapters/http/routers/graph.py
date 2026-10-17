@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Response
 from backend.host.state import AppState
 
 from ..dependencies import get_state, require_session
-from ..schemas import EdgeCreate, NodeCreate, NodePatch
+from ..schemas import EdgeCreate, GraphRelationsApply, NodeCreate, NodePatch
 
 router = APIRouter(prefix="/api", tags=["graph"])
 
@@ -95,6 +95,17 @@ def delete_edge(
 ) -> Response:
     state.services.delete_edge(project_id, edge_id)
     return Response(status_code=204)
+
+
+@router.post('/projects/{project_id}/graph/relations/apply')
+def apply_relations(
+    project_id: str,
+    payload: GraphRelationsApply,
+    session: dict = Depends(require_session),
+    state: AppState = Depends(get_state),
+) -> dict:
+    from backend.application.services.graph_relations import GraphRelationsService
+    return GraphRelationsService(state.services).apply(project_id, payload.run_id, payload.suggestion_ids)
 
 
 __all__ = ["router"]

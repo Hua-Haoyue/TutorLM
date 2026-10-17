@@ -52,6 +52,37 @@ directory. `scripts/fixtures/markdown-support.md` is a manual upload sample;
 `scripts/browser-markdown-smoke.cjs` checks upload, rendering, table-cell source
 resolution, reload, search and desktop/mobile layout against a disposable backend.
 
+## Graph Relations And Layout
+
+The graph toolbar's AI relation action proposes additions, direction/type changes
+and removals for the current document. Previewing or rejecting suggestions leaves
+positions unchanged. Accepting selected suggestions applies them first, then
+animates a root-to-leaf, top-to-bottom layout and saves each node's position.
+An empty suggestion result also organizes the current graph. The existing manual
+layout button uses the same algorithm; cards can still be dragged afterwards.
+
+Layout measures rendered cards, reserves expansion width, and uses the bundled
+Dagre 3.1.1 engine for layered placement and crossing reduction. Learning ancestry
+takes priority. Dependency-like edges point from prerequisite to dependent for
+ranking only; stored edge directions and labels are not rewritten by layout.
+Symmetric and cycle-closing relations remain visible without forcing invalid
+hierarchy. Arbitrary cyclic/dense graphs cannot guarantee zero crossings.
+Edges track card geometry during the transition; reduced-motion preferences skip
+the animation. Saving positions is a bounded set of node updates, not an atomic
+transaction with relation acceptance; a save failure is reported and layout can
+be retried. Neither existing document content nor other documents are rearranged.
+
+Run `node --test scripts/test-graph-layout.cjs` here for geometry regressions.
+For the browser regression use a disposable local fake backend; from the repo
+root, set `PYTHONPATH` to `instance-app`, `TUTORLM_PROVIDER=fake`,
+`TUTORLM_RUN_MODE=demo`, `TUTORLM_INVITE_CODE=TLM-DEV-LOCAL`, and distinct
+`TUTORLM_DATA_DIR` / `TUTORLM_SESSION_DATA_DIR` under `var/`. Start it with
+`python -m uvicorn graph_layout_test_app:build_app --factory --app-dir instance-app/workbench/scripts --host 127.0.0.1 --port 8093`.
+Run the workbench dev server on 8094 with `--api http://127.0.0.1:8093`, then
+`node instance-app/workbench/scripts/browser-graph-layout.cjs` with
+`PLAYWRIGHT_MODULE` set to a local Playwright installation if needed. The fixture
+provider emits deterministic relation suggestions; no paid model is involved.
+
 ## Current Integration Boundaries
 
 Business data uses the actual `/api` endpoints and requires an application Bearer.

@@ -11,7 +11,7 @@
 | 插件 ID | 工作流 ID | 任务 kind |
 | --- | --- | --- |
 | `documents` | 无（文档基础服务由 Runtime 提供） | 无 |
-| `explanations` | `explanation.v1` | `explanation` |
+| `explanations` | `explanation.v1`、`graph_relations.v1` | `explanation`、`graph_relations` |
 | `knowledge-narration` | `narration.v1`、`retelling.v1` | `narration`、`retelling` |
 
 环境变量 `TUTORLM_ENABLED_PLUGINS` 使用逗号分隔的插件 ID，默认值为

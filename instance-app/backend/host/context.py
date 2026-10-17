@@ -53,6 +53,9 @@ class ScopedContext:
             services['explanations'] = explanations
         if 'models.generate' in self._grants:
             services['provider'] = app.provider
+        if {'knowledge.edges.read', 'models.generate'} <= self._grants:
+            from backend.application.services.graph_relations import GraphRelationsService
+            services['graph_relations'] = SimpleNamespace(preview=GraphRelationsService(app).preview)
         container = {'context': SimpleNamespace(**services)}
         if 'knowledge.write' in self._grants:
             container['explanations'] = explanations

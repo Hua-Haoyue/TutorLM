@@ -117,3 +117,6 @@ select.input { appearance: auto; }
 .doc :is(h4, h5, h6) { font-size: 16px; margin: 1.4em 0 .6em; }
 .answer :is(h1, h2, h3, h4, h5, h6), .note :is(h1, h2, h3, h4, h5, h6) { font: 600 14px/1.4 var(--sans); letter-spacing: 0; margin: 10px 0 6px; }
 .doc a, .answer a, .note a { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) {
+  .world.animate .gnode { transition: none; }
+}

@@ -832,8 +832,15 @@
     pool.forEach((n) => { if (!seen.has(n.id)) order.push(n); });
     return order;
   }
-  /* Column per depth, stacked in tree order. `all` ignores stored positions (auto-layout). */
+  /* Explicit layout ranks the graph; ordinary refresh preserves manually saved positions. */
   function computeLayout(all) {
+    if (all) {
+      const pool = docNodes();
+      const sizes = Object.fromEntries(pool.map(n => [n.id, {
+        width: elOf(n)?.offsetWidth || 332, height: elOf(n)?.offsetHeight || 150,
+      }]));
+      return TutorGraphLayout.layout(pool, S.edges, sizes);
+    }
     const cols = {}, out = {};
     treeOrder().forEach((n) => {
       if (!all && meta(n).position) return;
@@ -879,21 +886,49 @@
     const updated = await api.patch(`/api/nodes/${p(n.id)}`, { metadata: { ...meta(n), position: { x: Math.round(q.x), y: Math.round(q.y) } } });
     Object.assign(n, updated);
   }
-  async function autoLayout() {
+  let layoutBusy = false;
+  async function autoLayout({ silent = false } = {}) {
+    if (layoutBusy) throw new Error('节点正在排列，请稍候');
     const pool = docNodes();
     if (!pool.length) return;
-    const target = computeLayout(true);
-    world.classList.add('animate');
-    pool.forEach((n) => {
-      n.metadata = { ...meta(n), position: target[n.id] };
-      const el = elOf(n); if (el) { el.style.left = target[n.id].x + 'px'; el.style.top = target[n.id].y + 'px'; }
-    });
-    const t0 = performance.now();
-    (function frame() { drawEdges(); drawConnector(); if (performance.now() - t0 < 420) requestAnimationFrame(frame); else { world.classList.remove('animate'); fitView(); } })();
-    // Persist sequentially in small batches to stay within request limits.
-    const queue = [...pool];
-    await sync(Promise.all(Array.from({ length: 4 }, async () => { while (queue.length) await persistPosition(queue.shift()); })));
-    toast('已按层级排列并保存布局');
+    const projectId = S.project.id, documentId = S.doc.id;
+    const current = () => S.project?.id === projectId && S.doc?.id === documentId;
+    const button = $('[data-act="auto-layout"]');
+    layoutBusy = true;
+    if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); }
+    try {
+      const target = computeLayout(true);
+      const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      world.classList.toggle('animate', !reduced);
+      // Flush start geometry before changing positions so even a fresh graph animates.
+      void world.offsetWidth;
+      pool.forEach((n) => {
+        n.metadata = { ...meta(n), position: target[n.id] };
+        const el = elOf(n); if (el) { el.style.left = target[n.id].x + 'px'; el.style.top = target[n.id].y + 'px'; }
+      });
+      await new Promise(resolve => {
+        const start = performance.now();
+        function frame(now) {
+          if (!current()) { resolve(); return; }
+          drawEdges(); drawConnector();
+          if (reduced || now - start >= 420) { resolve(); return; }
+          requestAnimationFrame(frame);
+        }
+        requestAnimationFrame(frame);
+      });
+      if (!current()) return;
+      world.classList.remove('animate');
+      fitView();
+      // Persist only this document, with bounded parallelism and no unrelated writes.
+      const queue = [...pool];
+      await sync(Promise.all(Array.from({ length: 4 }, async () => {
+        while (queue.length && current()) await persistPosition(queue.shift());
+      })));
+      if (!silent && current()) toast('已从根到叶排列并保存布局');
+    } finally {
+      world.classList.remove('animate'); layoutBusy = false;
+      if (button) { button.disabled = false; button.removeAttribute('aria-busy'); }
+    }
   }
 
   /* ================= Edges =================
@@ -925,12 +960,24 @@
       if (!A || !B) return;
       e.A = A; e.B = B;
       e.dir = B.x >= A.x + A.w ? 1 : B.x + B.w <= A.x ? -1 : 0;
-      (outs[e.a.id + (e.dir === -1 ? 'L' : 'R')] ||= []).push(e);
-      (ins[e.b.id + (e.dir === 1 ? 'L' : 'R')] ||= []).push(e);
+      e.vertical = B.y >= A.y + A.h ? 1 : B.y + B.h <= A.y ? -1 : 0;
+      (outs[e.a.id + (e.vertical ? e.vertical === 1 ? 'B' : 'T' : e.dir === -1 ? 'L' : 'R')] ||= []).push(e);
+      (ins[e.b.id + (e.vertical ? e.vertical === 1 ? 'T' : 'B' : e.dir === 1 ? 'L' : 'R')] ||= []).push(e);
       list.push(e);
     });
     const spread = (arr, end) => {
       const R = (e) => (end === 'y1' ? e.A : e.B), O = (e) => (end === 'y1' ? e.B : e.A);
+      if (arr[0].vertical) {
+        arr.sort((a, b) => O(a).x + O(a).w / 2 - O(b).x - O(b).w / 2);
+        arr.forEach((e, i) => {
+          const r = R(e), span = Math.min(r.w - 32, (arr.length - 1) * 20);
+          const x = r.x + r.w / 2 + (arr.length > 1 ? i * span / (arr.length - 1) - span / 2 : 0);
+          e[end === 'y1' ? 'x1' : 'x2'] = x;
+          const bottom = end === 'y1' ? e.vertical > 0 : e.vertical < 0;
+          e[end] = r.y + (bottom ? r.h : 0);
+        });
+        return;
+      }
       arr.sort((p, q) => (O(p).y + O(p).h / 2) - (O(q).y + O(q).h / 2));
       arr.forEach((e, i) => {
         const r = R(e), top = 17, span = Math.min(Math.max(0, r.h - 34), (arr.length - 1) * 16);
@@ -941,15 +988,19 @@
     Object.values(ins).forEach((arr) => spread(arr, 'y2'));
     const parts = list.map((e) => {
       const { A, B, dir } = e;
-      const x1 = dir === -1 ? A.x : A.x + A.w, x2 = dir === 1 ? B.x : B.x + B.w;
+      const x1 = e.vertical ? e.x1 : dir === -1 ? A.x : A.x + A.w;
+      const x2 = e.vertical ? e.x2 : dir === 1 ? B.x : B.x + B.w;
       const dx = dir === 0 ? 48 : Math.max(36, Math.abs(x2 - x1) / 2) * dir;
       const c2 = dir === 0 ? x2 + 48 : x2 - dx;
-      const d = `M${x1} ${e.y1} C${x1 + dx} ${e.y1}, ${c2} ${e.y2}, ${x2} ${e.y2}`;
+      const dy = Math.max(30, Math.abs(e.y2 - e.y1) / 2) * e.vertical;
+      const d = e.vertical
+        ? `M${x1} ${e.y1} C${x1} ${e.y1 + dy}, ${x2} ${e.y2 - dy}, ${x2} ${e.y2}`
+        : `M${x1} ${e.y1} C${x1 + dx} ${e.y1}, ${c2} ${e.y2}, ${x2} ${e.y2}`;
       const on = S.selected && (e.a.id === S.selected || e.b.id === S.selected);
       if (!e.rel) return `<path class="${on ? 'on' : ''}" marker-end="url(#arrow)" d="${d}"/>`;
       const label = esc(REL[e.rel] || e.rel);
       return `<path class="rel ${on ? 'on' : ''}" marker-end="url(#arrow)" d="${d}"><title>${label}</title></path>
-        <text class="rel-label" x="${(x1 + x2) / 2 + (dir === 0 ? 40 : 0)}" y="${(e.y1 + e.y2) / 2 - 4}" text-anchor="middle">${label}</text>`;
+        <text class="rel-label" x="${(x1 + x2) / 2 + (!e.vertical && dir === 0 ? 40 : 0)}" y="${(e.y1 + e.y2) / 2 - 4}" text-anchor="middle">${label}</text>`;
     });
     $('#edge-g').innerHTML = parts.join('');
   }
@@ -1049,6 +1100,7 @@
   let drag = null;
   const NO_DRAG = 'button, input, textarea, select, form, a, details, .answer, .bubble, .chat__log, .xpl__body, .minimap';
   surface.addEventListener('pointerdown', (e) => {
+    if (layoutBusy) return;
     if (e.button !== 0 || e.target.closest('.inspector')) return;
     touchCanvas();
     const nEl = e.target.closest('.gnode');
@@ -1652,6 +1704,77 @@
     await sync(api.put('/api/learning/profile', { expected_revision: profile.revision, profile: { education_stage: stage } }));
     return true;
   }
+  let relationsBusy = false;
+  async function organizeRelations() {
+    if (relationsBusy) return;
+    if (layoutBusy) throw new Error('节点正在排列，请稍候');
+    if (!S.doc || S.nodes.filter(inDoc).length < 2) throw new Error('当前文档至少需要两个节点才能梳理关系');
+    const projectId = S.project.id, documentId = S.doc.id;
+    const button = $('[data-act="ai-relations"]');
+    relationsBusy = true;
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    let runId, resultReceived = false;
+    const pending = modal({ title: 'AI 梳理关系', body: '<p role="status">正在梳理…</p>',
+      actions: [{ label: '取消', run: (close) => { close(); if (runId) api.cancel(runId).catch(fail); } }] });
+    try {
+      const result = await api.run('graph_relations', { document_id: documentId }, { onRun: (run) => {
+        runId = run.id;
+        if (!pending.root.isConnected && !api.TERMINAL.has(run.state)) api.cancel(run.id).catch(() => {});
+      } });
+      if (!pending.root.isConnected) return;
+      resultReceived = true;
+      pending.close();
+      if (S.project?.id !== projectId || S.doc?.id !== documentId) return;
+      const suggestions = result.suggestions || [];
+      if (!suggestions.length) await autoLayout({ silent: true });
+      if (S.project?.id !== projectId || S.doc?.id !== documentId) return;
+      const name = (id) => nodeOf(id)?.title || id;
+      const relation = (item) => `<span>${esc(name(item.source_node_id))}</span><span class="relation-review__arrow"> → ${esc(REL[item.relation] || item.relation)} → </span><span>${esc(name(item.target_node_id))}</span>`;
+      modal({ title: suggestions.length ? `关系建议 · ${suggestions.length} 项` : '关系梳理完成', wide: true,
+        body: suggestions.length ? `<div class="relation-review">${suggestions.map((s) => `<label class="relation-review__item">
+          <input type="checkbox" value="${esc(s.id)}" checked>
+          <span class="relation-review__content"><strong>${esc({ add: '新增', update: '调整', remove: '移除' }[s.action])}</strong>
+          ${s.previous ? `<span class="relation-review__before">${relation(s.previous)}</span>` : ''}
+          ${s.action !== 'remove' ? `<span class="relation-review__after">${relation(s)}</span>` : ''}
+          <span class="muted">${esc(s.reason)}</span></span></label>`).join('')}</div>` : '<p>当前关系无需调整。</p>',
+        actions: [ { label: suggestions.length ? '保留原连线' : '完成', run: (close) => close() },
+          ...(suggestions.length ? [{ label: '保留选中建议', primary: true, id: 'apply-relations', run: async (close, root, applyButton) => {
+            const ids = $$('input[type="checkbox"]:checked', root).map((c) => c.value);
+            if (!ids.length) return;
+            if (S.project?.id !== projectId || S.doc?.id !== documentId) throw new Error('当前文档已切换，请重新梳理');
+            applyButton.disabled = true;
+            try {
+              const applied = await sync(api.post(`/api/projects/${api.part(projectId)}/graph/relations/apply`, { run_id: runId, suggestion_ids: ids }));
+              if (root.isConnected) close();
+              if (S.project?.id === projectId) {
+                await refreshGraph();
+                if (S.doc?.id === documentId) await autoLayout({ silent: true });
+              }
+              toast(`已保留 ${applied.applied} 项关系建议`);
+            } catch (err) {
+              if (err.status === 409) {
+                if (root.isConnected) close();
+                await refreshGraph();
+              }
+              throw err;
+            } finally { applyButton.disabled = false; }
+          } }] : []) ],
+        onOpen: (root) => {
+          const update = () => { const b = $('#apply-relations', root); if (b) b.disabled = !root.querySelector('input:checked'); };
+          root.addEventListener('change', update);
+        },
+      });
+    } catch (err) {
+      if (resultReceived) throw err;
+      if (pending.root.isConnected) { pending.close(); throw err; }
+    } finally {
+      relationsBusy = false;
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+    }
+  }
+
   async function retell(n) {
     if (running(n.id)) throw new Error('这个节点正在生成，请稍候');
     if (!(await ensureProfile())) return;
@@ -2545,7 +2668,7 @@
     'zoom-in': () => zoomAt(...surfaceCenter(), S.view.z * 1.2),
     'zoom-out': () => zoomAt(...surfaceCenter(), S.view.z / 1.2),
     'zoom-reset': () => zoomAt(...surfaceCenter(), 1),
-    'fit': fitView, 'auto-layout': autoLayout,
+    'fit': fitView, 'auto-layout': autoLayout, 'ai-relations': organizeRelations,
     'toggle-explorer': () => togglePane('no-explorer', 'toggle-explorer'),
     'toggle-canvas': () => togglePane('no-canvas', 'toggle-canvas'),
     'toggle-follow': () => { setPref('follow', !prefs.follow); toast(prefs.follow ? '知识图将跟随阅读区滚动' : '已关闭跟随滚动'); },
