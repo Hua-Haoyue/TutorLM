@@ -5,6 +5,42 @@ from backend.domain.errors import InvalidInputError, ProviderError
 
 
 STRATEGY = 'obstacles.v1'
+DEPTH_POLICY_VERSION = 'depth-style.v1'
+
+
+def explanation_policy(depth):
+    if depth == 0:
+        return {
+            'version': DEPTH_POLICY_VERSION, 'level': 'L0', 'task': 'context_anchor',
+            'rules': 'At most TWO sentences. State the role in the original passage, '
+                     'then the core definition. Give conclusions only, never a derivation. '
+                     'Use restrained professional language and bold ONE or TWO load-bearing '
+                     'technical terms as entry points for follow-up. No examples or analogy.',
+        }
+    if depth <= 2:
+        return {
+            'version': DEPTH_POLICY_VERSION, 'level': 'L1-L2', 'task': 'mechanism',
+            'rules': 'Use one compact block of THREE or FOUR short lines, with at most '
+                     'FOUR short sentences. Keep each causal step brief; no long paragraphs. '
+                     'Start with a brief '
+                     'link to the parent difficulty, then explain input -> processing -> output. '
+                     'Use direct causal language: through A achieve B, thereby solve C. '
+                     'Use everyday causal verbs instead of introducing textbook jargon. '
+                     'Remove decorative wording; bold at most ONE term.',
+        }
+    return {
+        'version': DEPTH_POLICY_VERSION, 'level': 'L3+', 'task': 'everyday_intuition',
+        'rules': 'Use TWO or THREE short sentences. Map the selected difficulty to a '
+                 'familiar everyday or physical scene, then reveal its essence in one sentence. '
+                 'Start directly with the familiar scene. Do NOT repeat the technical name '
+                 'from the source or question, even as the subject of the analogy. Replace ALL '
+                 'discipline-specific terminology with everyday words; introduce NO '
+                 'new technical terms and use NO bold text. End with a self-contained intuition, '
+                 'not another question, prerequisite, glossary, or invitation to dig deeper. '
+                 'Keep the analogy faithful; state any essential limitation in everyday words.',
+    }
+
+
 SYSTEM = '''You are a patient reading tutor. Return ONLY a JSON object with:
 {"kind":"concept|formula|reasoning|chart","answer":"complete Markdown explanation",
  "diagnostic":{"question":"one specific question","options":[
@@ -25,12 +61,21 @@ Check the local passage for already stated assumptions. Do not call a valid step
 mistake when its required assumptions are provided in the source.
 Chart: explain axes, units, legend, comparison and what evidence supports the conclusion.
 If chart/image information is absent, say what is missing; never invent visual details.
-Initially give 2-4 useful sentences, then at most ONE contextual diagnostic with
-two concrete alternatives when the question is vague. Do not ask generic 'understand?'.
-When response_mode is expand, diagnostic MUST be null; directly explain the chosen
-obstacle or expand the whole selected passage. Preserve mathematical conditions and
-Markdown; no arbitrary length cutoffs, no forced analogy, no depth-based hard stop.
+The server supplies explanation_depth and explanation_policy in learning_context.
+Follow explanation_policy.rules strictly for every answer, including regeneration,
+follow-up questions and response_mode expand. These tier rules take precedence over
+generic length/style preferences or requests for a longer answer. Do not display
+the tier, task or policy itself. Sentence/line budgets apply to answer, not JSON.
+L0 anchors the passage in at most two sentences; L1-L2 explains the mechanism in at
+most four short explicit lines; L3 and deeper uses a familiar analogy and everyday
+language in two or three sentences. Deeper does not mean longer or more technical.
+Only L1-L2 may include at most ONE contextual diagnostic with two concrete alternatives
+when the question is vague. At L0 and L3+, diagnostic MUST be null.
+When response_mode is expand, diagnostic MUST also be null; directly explain the chosen
+obstacle within the SAME tier's style and length budget. Never truncate an unfinished
+explanation to meet a budget: compose a complete concise answer instead.
 For a child, explain how the selected step/question supports the parent's goal.
+Here parent means the previous explanation node, never a family member.
 Reuse previous answer only as context, correcting errors rather than reinforcing them.
 Do not output provider/time metadata, question echoes, stage labels or glossary panels.
 Do not claim that the learner has mastered anything. Source availability is not proof
@@ -111,6 +156,7 @@ def build_context(app, node, nodes, histories, profile, response_mode, resolved=
     if own:
         context['previous_answer'] = {'id': own[0].id, 'answer': own[0].answer[:12000]}
     current, visited = node, {node.id}
+    explanation_depth = 0
     for depth in range(100):
         parent_id = (current.metadata.get('source') or {}).get('fromNode') or current.parent_id
         if not parent_id:
@@ -118,6 +164,7 @@ def build_context(app, node, nodes, histories, profile, response_mode, resolved=
         if parent_id in visited:
             raise InvalidInputError('Learning tree contains a cycle')
         visited.add(parent_id)
+        explanation_depth += 1
         parent = nodes.get(parent_id)
         if parent is None or parent.document_id != node.document_id:
             raise InvalidInputError('Follow-up source is unavailable')
@@ -136,6 +183,8 @@ def build_context(app, node, nodes, histories, profile, response_mode, resolved=
         current = parent
     else:
         raise InvalidInputError('Learning tree is too large')
+    context['explanation_depth'] = explanation_depth
+    context['explanation_policy'] = explanation_policy(explanation_depth)
     root_source = current.metadata.get('source') or {}
     context['reading_goal'] = {'title': current.title, 'selection': (root_source.get('quote') or current.content or '')[:4000]}
     if current.document_id:

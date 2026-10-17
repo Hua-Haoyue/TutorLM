@@ -51,17 +51,18 @@ def test_diagnostic_once_and_parent_reference(client, session_headers, project_i
     first = _run(client, session_headers, wait_for_run, node, question='没看懂')
     assert first['state'] == 'completed', first
     exp = first['result']['explanation']
-    assert len(exp['learning']['obstacle']['diagnostic']['options']) == 2
+    assert exp['learning']['obstacle']['diagnostic'] is None
     child = _node(client, session_headers, project_id, text_document['id'], parent_id=node['id'],
                   metadata={'source': {'fromNode': node['id'], 'fromExp': exp['id'], 'quote': '正文内容'}})
     result = _run(client, session_headers, wait_for_run, child)
     assert result['state'] == 'completed', result
     assert result['result']['explanation']['learning']['context']['parent_explanation_id'] == exp['id']
-    second = _run(client, session_headers, wait_for_run, node, question='没看懂')
+    assert len(result['result']['explanation']['learning']['obstacle']['diagnostic']['options']) == 2
+    second = _run(client, session_headers, wait_for_run, child, question='没看懂')
     assert second['state'] == 'completed', second
     assert second['result']['explanation']['learning']['obstacle']['diagnostic'] is None
     history = client.get(f'/api/projects/{project_id}/explanations', headers=session_headers).json()['items']
-    assert len([e for e in history if e['node_id'] == node['id']]) == 2
+    assert len([e for e in history if e['node_id'] == child['id']]) == 2
 
 
 def test_malformed_generation_keeps_previous_success(client, session_headers, project_id, text_document, wait_for_run, monkeypatch):
@@ -90,3 +91,38 @@ def test_context_is_bounded_and_rejects_foreign_parent_explanation(client, sessi
                   metadata={'source': {'fromNode': node['id'], 'fromExp': 'missing', 'quote': '正文内容'}})
     assert _run(client, session_headers, wait_for_run, child)['state'] == 'failed'
     assert len(captured) == 1
+
+
+def test_depth_policy_follows_ancestry_and_survives_expand(client, session_headers, project_id, text_document, wait_for_run, monkeypatch):
+    from backend.host.local.provider import FakeProvider
+    captured, original = [], FakeProvider.explain
+
+    def inspect(self, request):
+        captured.append(request.learning_context)
+        return original(self, request)
+
+    monkeypatch.setattr(FakeProvider, 'explain', inspect)
+    parent = None
+    expected = ['context_anchor', 'mechanism', 'mechanism', 'everyday_intuition', 'everyday_intuition']
+    for depth, task in enumerate(expected):
+        extra = {}
+        if parent:
+            # Both ordinary parent links and explanation-selection links carry depth.
+            extra = ({'parent_id': parent['id']} if depth % 2 else
+                     {'metadata': {'source': {'fromNode': parent['id'], 'quote': '正文内容'}}})
+        node = _node(client, session_headers, project_id, text_document['id'], **extra)
+        result = _run(client, session_headers, wait_for_run, node, question='请详细回答，给出推导和专业术语')
+        assert result['state'] == 'completed', result
+        context = captured[-1]
+        assert context['explanation_depth'] == depth
+        assert context['explanation_policy']['task'] == task
+        explanation = result['result']['explanation']
+        assert explanation['learning']['context']['explanation_depth'] == depth
+        assert context['reading_goal']['title'] == '推导中的这一步'
+        assert bool(explanation['learning']['obstacle']['diagnostic']) == (depth in (1, 2))
+        expanded = _run(client, session_headers, wait_for_run, node, response_mode='expand')
+        assert expanded['state'] == 'completed', expanded
+        assert captured[-1]['explanation_policy'] == context['explanation_policy']
+        assert captured[-1]['response_mode'] == 'expand'
+        assert expanded['result']['explanation']['learning']['obstacle']['diagnostic'] is None
+        parent = node

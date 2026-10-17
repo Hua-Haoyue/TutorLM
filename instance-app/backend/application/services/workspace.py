@@ -99,6 +99,9 @@ class ExplanationService:
         context = build_context(self._app, node, nodes, self.list_for_node,
                                 LearningService(self._app).get_profile(),
                                 'auto' if allow_diagnostic else 'expand', resolved)
+        allow_diagnostic = allow_diagnostic and context['explanation_depth'] in (1, 2)
+        if not allow_diagnostic:
+            context['response_mode'] = 'expand'
         request = ExplanationRequest(node=node, question=question, learning_context=context)
         try:
             answer, obstacle = parse_answer(self._app.provider.explain(request), allow_diagnostic=allow_diagnostic)
@@ -109,7 +112,8 @@ class ExplanationService:
         explanation = Explanation.create(project_id=node.project_id, node_id=node.id, question=question,
                                          answer=answer, provider=capabilities.name, model=capabilities.model)
         explanation.learning = {'obstacle': obstacle, 'context': {
-            key: context[key] for key in ('source_status', 'document_revision_id') if key in context}}
+            key: context[key] for key in ('source_status', 'document_revision_id',
+                                         'explanation_depth', 'explanation_policy') if key in context}}
         if context.get('parent'):
             explanation.learning['context']['parent_explanation_id'] = context['parent']['explanation_id']
         return explanation
