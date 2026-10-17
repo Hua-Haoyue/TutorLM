@@ -1131,10 +1131,8 @@
     return len ? Math.min(len - 1, Math.max(0, Number.isInteger(i) ? i : len - 1)) : -1;
   }
   function currentPage(n) {
-    // History comes from the server in created_at DESC, rowid DESC order.
-    // Stable sorting preserves that explicit record order for equal timestamps.
-    return [...(S.history[n.id] || [])].filter((e) => typeof e.answer === 'string' && e.answer.trim())
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0] || null;
+    const pages = pagesOf(n), index = pageIndex(n);
+    return index >= 0 ? pages[index] : null;
   }
   const marksOf = (n, expId) => (meta(n).marks || []).filter((m) => m.e === expId);
 
@@ -1208,7 +1206,7 @@
     const retell = S.kinds.has('retelling') && page && kids ? `<button class="btn btn--sm" data-act="node-retell" ${run ? 'disabled' : ''}
         title="把已解释的 ${kids} 个子节点串回这个父节点，生成一版回讲">${icon('narrate')}回讲</button>` : '';
     const pageBody = page
-      ? `<div class="xpl__body"><div class="answer" data-answer-node="${esc(n.id)}" data-exp="${esc(page.id)}">${answerHtml(n, page)}</div></div>${diagnosticHtml(n, page, run)}`
+      ? `${pager}<div class="xpl__body"><div class="answer" data-answer-node="${esc(n.id)}" data-exp="${esc(page.id)}">${answerHtml(n, page)}</div></div>${diagnosticHtml(n, page, run)}`
       : `<div class="xpl__empty"><span>${canExplain ? '还没有解释。' : '当前镜像未启用解释工作流。'}</span>${canExplain ? `<button class="btn btn--sm btn--primary" data-act="node-explain" ${run ? 'disabled' : ''}>${icon('sparkle')}生成解释</button>` : ''}</div>`;
     return `<div class="gnode sel ${m.status === 'mastered' ? 'mastered' : ''}" ${attrs} role="group" aria-label="知识节点：${esc(n.title)}">
       <div class="gnode__head">
