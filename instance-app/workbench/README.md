@@ -208,3 +208,12 @@ animated brand/tagline SVGs. Reduced-motion mode keeps the poster paused and
 plain title text. `scripts/browser-homepage.cjs` checks desktop/mobile playback,
 reduced motion, title bounds and the missing-SVG fallback without creating any
 application data or calling a model.
+
+Formula title regressions are covered by `scripts/test-math-title.cjs`
+(run with `node --test`). With `PLAYWRIGHT_MODULE`
+set, `scripts/browser-math-selection.cjs` checks formula source ranges and
+rendering. `scripts/browser-math-workspace.cjs` uses `APP_URL` for static files
+and intercepts all API requests, so it creates no server data or model runs.
+These checks cover supported formula selection paths and recovery of truncated
+automatic titles; they do not validate every arbitrary formula fragment or
+actual PDF/ZIP import.

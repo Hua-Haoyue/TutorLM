@@ -7,6 +7,36 @@
     const md = new MarkdownIt({ html: false, breaks: false, linkify: false, typographer: false });
     const escape = md.utils.escapeHtml;
     math ||= escape;
+    const mathSource = token => token.meta?.sourceContent ?? token.content;
+    function findLiteral(source, literal, from = 0) {
+      const at = source.indexOf(literal, from);
+      if (at >= 0) return { at, text: literal };
+      const pattern = literal.split('\n').map(line => line.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\r?\\n');
+      const match = new RegExp(pattern).exec(source.slice(from));
+      return match ? { at: from + match.index, text: match[0] } : null;
+    }
+    function rawOffset(source, offset) {
+      let raw = 0, normalized = 0;
+      while (raw < source.length && normalized < offset) {
+        if (source[raw] === '\r' && source[raw + 1] === '\n') raw++;
+        raw++; normalized++;
+      }
+      return raw;
+    }
+
+    function mathAttrs(token, env) {
+      if (!root.TutorMathSelection) return '';
+      if (Number.isInteger(token.meta?.sourceStart)) return root.TutorMathSelection.attributes(mathSource(token), token.meta.sourceStart);
+      const literal = token.meta?.literal || token.content;
+      const at = env.source?.indexOf(literal, env.mathCursor || 0) ?? -1;
+      let start = -1;
+      if (at >= 0) {
+        const inner = literal.indexOf(token.content, token.meta?.openLength || 0);
+        if (inner >= 0) start = at + inner;
+        env.mathCursor = at + literal.length;
+      }
+      return root.TutorMathSelection.attributes(token.content, start);
+    }
 
     md.inline.ruler.before('escape', 'math_inline', (state, silent) => {
       const start = state.pos;
@@ -20,13 +50,28 @@
       if (!silent) {
         const token = state.push('math_inline', 'span', 0);
         token.content = state.src.slice(start + 1, end);
+        token.meta = { literal: state.src.slice(start, end + 1), openLength: 1, inlineStart: start };
       }
       state.pos = end + 1;
       return true;
     });
-    md.renderer.rules.math_inline = (tokens, index) => `<span class="math">${math(tokens[index].content)}</span>`;
+    md.renderer.rules.math_inline = (tokens, index, options, env) => `<span class="math"${mathAttrs(tokens[index], env)}>${math(mathSource(tokens[index]))}</span>`;
 
     const PAIRS = [['\\(', '\\)', false], ['\\[', '\\]', true], ['$$', '$$', true]];
+    md.inline.ruler.before('escape', 'math_environment', (state, silent) => {
+      const start = state.pos;
+      const open = state.src.slice(start).match(/^\\begin\{(equation\*?|align\*?|alignat\*?|gather\*?)\}/);
+      if (!open) return false;
+      const close = `\\end{${open[1]}}`, end = state.src.indexOf(close, start + open[0].length);
+      if (end < 0) return false;
+      if (!silent) {
+        const token = state.push('math_display', 'span', 0);
+        token.content = state.src.slice(start, end + close.length);
+        token.meta = { literal: token.content, openLength: 0, inlineStart: start };
+      }
+      state.pos = end + close.length;
+      return true;
+    });
     md.inline.ruler.before('escape', 'math_delimited', (state, silent) => {
       const start = state.pos;
       const pair = PAIRS.find(([open]) => state.src.startsWith(open, start));
@@ -39,11 +84,12 @@
       if (!silent) {
         const token = state.push(display ? 'math_display' : 'math_inline', 'span', 0);
         token.content = content.trim();
+        token.meta = { literal: state.src.slice(start, end + close.length), openLength: open.length, inlineStart: start };
       }
       state.pos = end + close.length;
       return true;
     });
-    md.renderer.rules.math_display = (tokens, index) => `<span class="math math--display">${math(tokens[index].content, true)}</span>`;
+    md.renderer.rules.math_display = (tokens, index, options, env) => `<span class="math math--display"${mathAttrs(tokens[index], env)}>${math(mathSource(tokens[index]), true)}</span>`;
 
     md.block.ruler.before('fence', 'math_block', (state, start, end, silent) => {
       const first = state.src.slice(state.bMarks[start] + state.tShift[start], state.eMarks[start]);
@@ -69,12 +115,29 @@
       return true;
     }, { alt: ['paragraph', 'reference', 'blockquote', 'list'] });
     md.renderer.rules.math_block = (tokens, index, options, env, self) =>
-      `<div${self.renderAttrs(tokens[index])} class="math-block">${math(tokens[index].content, true)}</div>\n`;
+      `<div${self.renderAttrs(tokens[index])} class="math-block"${mathAttrs(tokens[index], env)}>${math(mathSource(tokens[index]), true)}</div>\n`;
 
     md.core.ruler.push('tasks_and_source_ranges', state => {
       let block = 0, row = null, cells = [], cellIndex = 0;
       for (let i = 0; i < state.tokens.length; i++) {
         const token = state.tokens[i];
+        if (token.map && (token.type === 'inline' || token.type === 'math_block')) {
+          let cursor = state.env.starts[token.map[0]] || 0;
+          const limit = state.env.starts[token.map[1]] ?? state.env.length;
+          const inlineMatch = token.type === 'inline' ? findLiteral(state.env.source, token.content, cursor) : null;
+          for (const child of token.type === 'math_block' ? [token] : token.children || []) {
+            if (!['math_inline', 'math_display', 'math_block'].includes(child.type)) continue;
+            const literal = child.meta?.literal || child.content;
+            const from = inlineMatch && Number.isInteger(child.meta?.inlineStart)
+              ? inlineMatch.at + rawOffset(inlineMatch.text, child.meta.inlineStart) : cursor;
+            const found = findLiteral(state.env.source, literal, from);
+            if (!found || found.at + found.text.length > limit) continue;
+            const content = findLiteral(found.text, child.content, child.meta?.openLength || 0);
+            if (!content) continue;
+            child.meta = { ...child.meta, sourceStart: found.at + content.at, sourceContent: content.text };
+            cursor = found.at + found.text.length;
+          }
+        }
         if (token.type === 'tr_open') {
           row = token.map;
           cells = []; cellIndex = 0;
@@ -139,7 +202,26 @@
         for (const match of source.matchAll(/\r\n?|\n/g)) starts.push(match.index + match[0].length);
         return md.render(source, { blocks, starts, source, length: source.length });
       },
-      inline: value => md.renderInline(String(value || '')),
+      inline: value => { const source = String(value || ''); return md.renderInline(source, { source, starts: [0], length: source.length, blocks: false }); },
+      text(value, { offset = 0 } = {}) {
+        const source = String(value || ''), env = { source, starts: [0], length: source.length, blocks: false };
+        const tokens = md.parseInline(source, env)[0]?.children || [];
+        let cursor = 0, html = '';
+        for (const token of tokens) {
+          if (!['math_inline', 'math_display'].includes(token.type)) continue;
+          const literal = token.meta.literal;
+          const from = Number.isInteger(token.meta.inlineStart) ? rawOffset(source, token.meta.inlineStart) : cursor;
+          const found = findLiteral(source, literal, from);
+          if (!found) continue;
+          html += escape(source.slice(cursor, found.at)).replace(/\r?\n/g, '<br>');
+          const content = findLiteral(found.text, token.content, token.meta.openLength);
+          if (!content) continue;
+          token.meta.sourceStart = offset + found.at + content.at; token.meta.sourceContent = content.text;
+          html += md.renderer.rules[token.type]([token], 0, md.options, env);
+          cursor = found.at + found.text.length;
+        }
+        return html + escape(source.slice(cursor)).replace(/\r?\n/g, '<br>');
+      },
     };
   }
   if (typeof module === 'object' && module.exports) module.exports = { createRenderer };

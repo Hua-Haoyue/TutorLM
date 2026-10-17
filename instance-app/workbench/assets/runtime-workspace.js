@@ -15,7 +15,7 @@
   /* ================= State ================= */
   const S = {
     projects: [], project: null, docs: [], doc: null, text: '', nodes: [], edges: [],
-    history: {}, runs: {}, pendingChat: {}, selected: null, kinds: new Set(), views: {}, modes: {},
+    history: {}, narrations: [], narrationPages: {}, runs: {}, pendingChat: {}, selected: null, kinds: new Set(), views: {}, modes: {},
     view: { x: 0, y: 0, z: 0.85 }, layout: {}, mode: 'md', tool: 'select',
     find: { open: false, q: '', hits: [], i: -1 }, ask: null, modal: false, connected: false,
   };
@@ -268,7 +268,7 @@
   /* ================= Markdown (subset, escape-first) =================
      Top-level blocks get data-b="<index>" so anchors survive re-render. */
   function mathHtml(m, display = false) {
-    if (window.katex) return katex.renderToString(m, { displayMode: !!display, throwOnError: false, trust: false, strict: 'ignore', output: 'html' });
+    if (window.katex) return TutorMathSelection.render(katex, m, display);
     return esc(m)
       .replace(/\^(\{[^}]*\}|[\wᵀ]+)/g, (_, x) => '<sup>' + x.replace(/[{}]/g, '') + '</sup>')
       .replace(/_(\{[^}]*\}|[A-Za-z0-9]+)/g, (_, x) => '<sub>' + x.replace(/[{}]/g, '') + '</sub>');
@@ -278,7 +278,7 @@
   const renderMd = (raw, options) => markdown.render(raw, options);
   const isMarkdown = (d) => !d || (d.format ? d.format === 'md' : !/\.txt$/i.test(d.source_filename || d.title || ''));
   const renderTxt = (raw) => [...String(raw || '').matchAll(/\S[\s\S]*?(?=\r?\n\s*\r?\n|$)/g)]
-    .map((m, i) => `<p data-b="${i}" data-start="${m.index}" data-end="${m.index + m[0].length}">${esc(m[0].trim()).replace(/\r?\n/g, '<br>')}</p>`).join('');
+    .map((m, i) => `<p data-b="${i}" data-start="${m.index}" data-end="${m.index + m[0].length}">${markdown.text(m[0], { offset: m.index })}</p>`).join('');
   const wordCount = (raw) => ((raw.match(/[㐀-鿿]/g) || []).length + (raw.match(/[A-Za-z0-9_]+/g) || []).length);
 
   /* ================= Reader ================= */
@@ -333,7 +333,7 @@
     }
     if (S.mode === 'raw') {
       sheet.innerHTML = `<div class="raw-note"><span class="label">源文本 · 只读</span><span class="mono muted">${S.text.length.toLocaleString()} 字符</span></div>
-        <pre class="raw" tabindex="0" aria-label="源文本">${esc(S.text)}</pre>`;
+        <pre class="raw" data-b="0" data-start="0" data-end="${S.text.length}" tabindex="0" aria-label="源文本">${esc(S.text)}</pre>`;
     } else {
       const body = isMarkdown(S.doc) ? renderMd(S.text) : renderTxt(S.text);
       if (S.mode === 'pdf') {
@@ -417,23 +417,34 @@
   function unwrap(sel) {
     $$(sel, sheet).forEach((m) => { const parent = m.parentNode; m.replaceWith(...m.childNodes); parent.normalize(); });
   }
+  function markMath(start, end, decorate) {
+    const targets = TutorMathSelection.targets(sheet, start, end);
+    for (const target of targets) {
+      const range = document.createRange(); range.selectNode(target); wrapRange(range, decorate);
+    }
+    return targets.length > 0;
+  }
   /* Anchors: nodes with metadata.source.quote point at that passage; heading-derived nodes
      (no metadata) point at the heading with the same title. */
   function applyMarks() {
     if (!S.doc || S.mode === 'raw') return;
     if (isPdfView()) { applyPdfMarks(); return; }
-    highlights.filter((h) => h.doc === S.doc.id).forEach((h) =>
-      wrapQuote(h.block, h.quote, (m) => { m.className = 'hl'; m.dataset.hl = h.id; m.title = '本地高亮（仅保存在此浏览器）'; }));
+    highlights.filter((h) => h.doc === S.doc.id).forEach((h) => {
+      const decorate = (m) => { m.className = 'hl'; m.dataset.hl = h.id; m.title = '本地高亮（仅保存在此浏览器）'; };
+      if (Number.isInteger(h.start) && markMath(h.start, h.end, decorate)) return;
+      wrapQuote(h.block, h.quote, decorate);
+    });
     S.nodes.filter((n) => n.document_id === S.doc.id).forEach((n) => {
       const src = meta(n).source;
       const deco = (m) => {
         m.className = 'anchor' + (n.id === S.selected ? ' on' : '');
         m.dataset.node = n.id; m.title = '知识节点：' + n.title;
       };
-      if (src?.selector?.type === 'text') {
+      if (['text', 'tex-source'].includes(src?.selector?.type)) {
         const live = liveAnchor(n);
         if (!live) return;
         const at = live.start;
+        if (markMath(live.start, live.end, deco)) return;
         const block = $$('[data-b]', sheet).find(el => Number(el.dataset.start) <= at && Number(el.dataset.end) > at);
         if (!block) return;
         const anchored = S.text.slice(live.start, live.end);
@@ -511,7 +522,7 @@
     const token = ++pdfToken;
     try {
       if (pdfBytes?.rev !== rev) pdfBytes = { rev, data: await sync(api.bytes(`/api/documents/${p(doc.id)}/source?revision_id=${p(rev)}`)) };
-      const { openPdfView } = await import(new URL('assets/pdf-view.js?v=obstacles-20261017-r2', document.baseURI).href);
+      const { openPdfView } = await import(new URL('assets/pdf-view.js?v=formula-20261018-r1', document.baseURI).href);
       const el = document.createElement('div');
       el.className = 'pdfv';
       const width = Math.round(Math.min(760, sheet.clientWidth || 760));
@@ -683,7 +694,8 @@
   function liveAnchor(n) {
     if (irLive.has(n.id)) return irLive.get(n.id);
     const src = meta(n).source;
-    if (src?.selector?.type !== 'text' || !S.doc || src.document_id !== S.doc.id || src.revision_id !== S.doc.current_revision_id) return null;
+    if (!['text', 'tex-source'].includes(src?.selector?.type) || !S.doc || src.document_id !== S.doc.id || src.revision_id !== S.doc.current_revision_id) return null;
+    if (src.selector.type === 'tex-source' && src.selector.file !== S.textFile) return null;
     if (src.selector.unit === 'utf16') return { start: src.selector.start, end: src.selector.end };
     const cps = Array.from(S.text);
     return { start: cps.slice(0, src.selector.start).join('').length, end: cps.slice(0, src.selector.end).join('').length };
@@ -771,7 +783,7 @@
   const askEl = $('#ask');
   const blockOf = (n) => (n && (n.nodeType === 1 ? n : n.parentElement))?.closest('[data-b]');
   function readerSelection() {
-    if (!S.doc || S.mode === 'raw' || S.tool === 'draw') return null;
+    if (!S.doc || S.tool === 'draw') return null;
     if (isPdfView()) {
       const s = pdfv?.view.selection();
       return s && { origin: { kind: 'pdf', quote: s.draft.quote, ref: s.draft, label: `第 ${s.page} 页` }, rect: s.rect };
@@ -783,7 +795,8 @@
     if (!startB || !sheet.contains(startB)) return null;
     let r = range;
     if (blockOf(range.endContainer) !== startB) { r = range.cloneRange(); r.setEnd(startB, startB.childNodes.length); }
-    let quote = r.toString().trim();
+    const mathSelection = TutorMathSelection.selection(r, startB, S.text);
+    let quote = mathSelection?.quote || r.toString().trim();
     if (quote.length < 1) return null;
     if (quote.length > 6000) return null;
     const block = Number(startB.dataset.b);
@@ -791,6 +804,8 @@
     const after = r.cloneRange(); after.selectNodeContents(startB); after.setStart(r.endContainer, r.endOffset);
     return { origin: { kind: 'doc', block, quote, prefix: before.toString().slice(-32), suffix: after.toString().slice(0, 32),
       sourceStart: Number(startB.dataset.start), sourceEnd: Number(startB.dataset.end), before: before.toString(), blockText: startB.textContent,
+      ...(mathSelection?.start != null ? { exactStart: mathSelection.start, exactEnd: mathSelection.end } : {}),
+      ...(S.textFile ? { sourceFile: S.textFile } : {}),
       documentId: S.doc.id, revisionId: S.doc.current_revision_id, label: sectionOf(block) }, rect: range.getBoundingClientRect() };
   }
   const countHits = (q) => countIn(sheet.textContent, q);
@@ -807,10 +822,10 @@
     askEl.classList.toggle('from-node', origin.kind === 'node');
     $('#ask-quote').textContent = '“' + clip(collapse(origin.quote), 140) + '”';
     $('#ask-input').value = '';
-    $('#ask-object').value = origin.kind === 'visual' ? 'chart' : 'auto';
+    $('#ask-object').value = origin.kind === 'visual' && origin.selector?.type !== 'pdf' ? 'chart' : 'auto';
     const canExplain = S.kinds.has('explanation');
     $('#ask-form').hidden = !canExplain;
-    if (origin.kind === 'pdf') {
+    if (origin.kind === 'pdf' || origin.kind === 'visual') {
       $('#ask-hits').textContent = countIn(S.text, origin.quote);
       $('#ask-src').textContent = clip(origin.label, 40);
     } else if (origin.kind === 'doc') {
@@ -854,6 +869,18 @@
     if (S.tool === 'highlight') { addHighlight(s.origin); getSelection().removeAllRanges(); return; }
     openAsk(s.origin, s.rect);
   }, 0));
+  document.addEventListener('dblclick', (event) => {
+    const math = event.target.closest('[data-math-source]');
+    if (!math || S.tool !== 'select' || S.modal) return;
+    if (!sheet.contains(math) && !math.closest('.gnode.sel .answer')) return;
+    const range = document.createRange(); range.selectNodeContents(math);
+    const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    event.preventDefault();
+    if (sheet.contains(math)) {
+      const selected = readerSelection();
+      if (selected) openAsk(selected.origin, selected.rect);
+    } else showSelBar(nodeSelection());
+  });
   sheet.addEventListener('click', (e) => {
     if (!getSelection().isCollapsed || S.tool === 'draw') return;
     const pv = isPdfView() && pdfv?.view;
@@ -865,6 +892,7 @@
   function addHighlight(o) {
     if (highlights.some((h) => h.doc === S.doc.id && h.quote === o.quote)) { toast('这段已经高亮'); return; }
     highlights.push({ id: 'h_' + Math.random().toString(36).slice(2, 9), doc: S.doc.id, block: o.block, quote: o.quote,
+      ...(Number.isInteger(o.exactStart) ? { start: o.exactStart, end: o.exactEnd } : {}),
       ...(o.kind === 'pdf' ? { pdf: o.ref.selector.pages } : {}) });
     saveHighlights(); refreshMarks();
   }
@@ -1415,6 +1443,40 @@
     return line.slice(0, cut).trimEnd() + '…';
   }
   const inlineMd = (value) => inline(String(value || '')).replace(/<\/?p>/g, '');
+  function bareFormula(text) {
+    if (!window.katex || /[\r\n\u3400-\u9fff]/.test(text) ||
+        !/\\(?:frac|dfrac|tfrac|sqrt|times|cdot|alpha|beta|gamma|theta|pi|sum|int|sin|cos|log|mathbf|mathrm)(?![A-Za-z])/.test(text)) return null;
+    try {
+      // Extracted formulas omit delimiters; percent signs still mean percentages.
+      const formula = text.replace(/(\\*)%/g, (match, slashes) => slashes.length % 2 ? match : slashes + '\\%');
+      const rendered = katex.renderToString(formula, { throwOnError: true, trust: false, strict: 'ignore', output: 'html' });
+      return `<span class="node-title-math" style="display:inline-block;max-width:100%;overflow-x:auto;vertical-align:middle">${rendered}</span>`;
+    } catch { return null; }
+  }
+  function formulaTitleSource(value, node) {
+    const text = String(value || ''), source = node?.metadata?.source?.quote;
+    // Recover only titles that exactly match the old automatic abbreviation.
+    if (typeof source === 'string' && text !== collapse(source) && text === guessTitle(source) && bareFormula(source)) return source;
+    return text;
+  }
+  function initialNodeTitle(quote) {
+    const text = collapse(quote);
+    return text.length <= 200 && bareFormula(text) ? text : guessTitle(quote);
+  }
+  function nodeTitle(value, node) {
+    const text = formulaTitleSource(value, node), html = inlineMd(text);
+    return html.includes('data-math-source=') ? html : bareFormula(text) || html;
+  }
+  function renderNarration(text) {
+    const box = document.createElement('div');
+    box.innerHTML = renderMd(text, { blocks: true });
+    box.querySelectorAll('strong, code, mark').forEach(el => {
+      if (el.closest('pre') || el.querySelector('.katex')) return;
+      const formula = bareFormula(el.textContent);
+      if (formula) el.innerHTML = formula;
+    });
+    return box.innerHTML;
+  }
   function splitAnswer(exp, n) {
     const text = String(exp.answer || '').trim();
     let brief = (exp.summary || '').trim();
@@ -1505,6 +1567,7 @@
 
   function nodeHtml(n) {
     const sel = n.id === S.selected, m = meta(n);
+    const titleSource = formulaTitleSource(n.title, n);
     const run = running(n.id) ? S.runs[n.id] : null;
     const pages = pagesOf(n), chat = chatOf(n), page = currentPage(n);
     const src = srcLabel(n);
@@ -1517,7 +1580,7 @@
       const dots = pages.length ? `<span class="dots" title="${pages.length} 版解释">${pages.slice(-5).map(() => '<i class="on"></i>').join('')}</span>` : '';
       return `<div class="gnode ${m.status === 'mastered' ? 'mastered' : ''}" ${attrs} tabindex="0" role="button" aria-label="知识节点：${esc(n.title)}">
         <div class="gnode__head">${kindLine}<span class="src" title="${esc(src)}">${esc(src)}</span></div>
-        <div class="gnode__body"><h4 class="md-inline">${inlineMd(n.title)}</h4><div class="gnode__sum md-inline">${inlineMd(sum)}</div>
+        <div class="gnode__body"><h4 class="md-inline">${nodeTitle(titleSource)}</h4><div class="gnode__sum md-inline">${inlineMd(sum)}</div>
         ${pages.length || chat.length ? `<div class="gnode__meta">${dots}${pages.length ? `<span>${pages.length} 版解释</span>` : ''}${chat.length ? `<span>${chat.length} 条对话</span>` : ''}</div>` : ''}
         ${run ? runLine(run) : ''}</div></div>`;
     }
@@ -1546,8 +1609,8 @@
         <button class="icon-btn" data-act="node-collapse" title="收起 (Esc)">${icon('close')}</button></div>
       <div class="gnode__scroll">
         <div class="gnode__body">
-          <h4 class="title-view md-inline" data-title-view tabindex="0" role="button" title="点击编辑标题" aria-label="节点标题：${esc(n.title)}，点击编辑">${inlineMd(n.title)}</h4>
-          <input class="title-input" data-title value="${esc(n.title)}" maxlength="160" aria-label="节点标题" hidden>
+          <h4 class="title-view md-inline" data-title-view tabindex="0" role="button" title="点击编辑标题" aria-label="节点标题：${esc(n.title)}，点击编辑">${nodeTitle(titleSource)}</h4>
+          <input class="title-input" data-title value="${esc(titleSource.length <= 200 ? titleSource : n.title)}" maxlength="200" aria-label="节点标题" hidden>
         </div>
         <div class="xpl">
           ${run ? runLine(run) : ''}
@@ -1640,6 +1703,14 @@
   /* Selection → server node. Reader selections hang under the section node that
      contains them; selections inside an explanation become follow-up children. */
   function textAnchor(origin) {
+    if (Number.isInteger(origin.exactStart) && Number.isInteger(origin.exactEnd) &&
+        S.text.slice(origin.exactStart, origin.exactEnd) === origin.quote) {
+      const start = origin.exactStart, end = origin.exactEnd;
+      return { document_id: origin.documentId, revision_id: origin.revisionId,
+        selector: { type: origin.sourceFile ? 'tex-source' : 'text', ...(origin.sourceFile ? { file: origin.sourceFile } : {}), start, end, unit: 'utf16' }, quote: origin.quote,
+        prefix: S.text.slice(Math.max(0, start - 32), start), suffix: S.text.slice(end, end + 32),
+        ...(S.textVersion ? { extractor_version: S.textVersion } : {}) };
+    }
     const raw = S.text.slice(origin.sourceStart, origin.sourceEnd);
     const pattern = collapse(origin.quote).split(' ').map(escRe).join('\\s+');
     const hits = [...raw.matchAll(new RegExp(pattern, 'g'))];
@@ -1648,7 +1719,7 @@
     if (hits.length !== renderedHits.length || !hits[ordinal]) throw new Error('无法把这段排版文字准确对应到原文，请缩小选区或使用图像。');
     const start = origin.sourceStart + hits[ordinal].index, end = start + hits[ordinal][0].length;
     return { document_id: origin.documentId, revision_id: origin.revisionId,
-      selector: { type: 'text', start, end, unit: 'utf16' }, quote: S.text.slice(start, end),
+      selector: { type: origin.sourceFile ? 'tex-source' : 'text', ...(origin.sourceFile ? { file: origin.sourceFile } : {}), start, end, unit: 'utf16' }, quote: S.text.slice(start, end),
       prefix: S.text.slice(Math.max(0, start - 32), start), suffix: S.text.slice(end, end + 32) };
   }
   async function createNodeFrom(origin) {
@@ -1658,10 +1729,19 @@
       parent = null; document_id = origin.documentId;
       const form = new FormData(); form.append('file', origin.blob, 'selection.png'); form.append('revision_id', origin.revisionId);
       const { visual } = await api.post(`/api/documents/${p(document_id)}/visuals`, form);
-      source = { quote: origin.quote };
+      source = { quote: origin.quote, ...(origin.selector?.type === 'pdf' ? { selector: origin.selector } : {}) };
       visualSource = { artifact_id: visual.id, document_id, revision_id: visual.revision_id, selector: origin.selector || { type: 'whole-image' } };
     } else if (origin.kind === 'pdf') {
-      parent = null; document_id = S.doc.id; source = pdfAnchor(origin.ref);
+      parent = null; document_id = S.doc.id;
+      try { source = pdfAnchor(origin.ref); }
+      catch (error) { if (!api.runtime?.learning_features?.visual_selection) throw error; }
+      if (!source?.document_id && api.runtime?.learning_features?.visual_selection) {
+        const crop = await pdfv.view.cropSelection(origin.ref.selector);
+        const form = new FormData(); form.append('file', crop.blob, 'formula.png'); form.append('revision_id', origin.ref.revision_id);
+        const { visual } = await api.post(`/api/documents/${p(document_id)}/visuals`, form);
+        source = { quote: origin.quote, selector: origin.ref.selector };
+        visualSource = { artifact_id: visual.id, document_id, revision_id: visual.revision_id, selector: crop.selector };
+      }
     } else if (origin.kind === 'node') {
       parent = nodeOf(origin.nodeId);
       document_id = parent.document_id;
@@ -1677,7 +1757,7 @@
     }
     const initialPosition = placeNew(parent);
     const node = await sync(api.post(`${projectPath()}/nodes`, {
-      document_id, title: guessTitle(origin.quote), kind: 'concept',
+      document_id, title: initialNodeTitle(origin.quote), kind: 'concept',
       content: origin.quote.slice(0, 20000), parent_id: parent?.id || null,
       metadata: { source, branch_type: origin.branchType || 'auto', ...(visualSource ? { visual_source: visualSource } : {}),
         status: 'learning', position: initialPosition, layout_default: { ...initialPosition, scale: 1 }, pages: [] },
@@ -1764,7 +1844,7 @@
     if (!e.target.matches?.('[data-title]')) return;
     const view = e.target.parentElement.querySelector('[data-title-view]');
     if (!view) return;
-    view.innerHTML = inlineMd(e.target.value);
+    view.innerHTML = nodeTitle(e.target.value, nodeOf(e.target.closest('.gnode')?.dataset.id));
     e.target.hidden = true; view.hidden = false;
     drawEdges();
   });
@@ -1842,7 +1922,12 @@
     const range = sel.getRangeAt(0), before = range.cloneRange(), after = range.cloneRange();
     before.selectNodeContents(host); before.setEnd(range.startContainer, range.startOffset);
     after.selectNodeContents(host); after.setStart(range.endContainer, range.endOffset);
-    return { quote: sel.toString().trim(), prefix: before.toString().slice(-64), suffix: after.toString().slice(0, 64), nodeId: host.dataset.answerNode, expId: host.dataset.exp, rect: range.getBoundingClientRect() };
+    const answer = (S.history[host.dataset.answerNode] || []).find(item => item.id === host.dataset.exp)?.answer;
+    const mathSelection = TutorMathSelection.selection(range, host, answer);
+    return { quote: mathSelection?.quote || sel.toString().trim(),
+      prefix: mathSelection?.start != null && answer ? answer.slice(Math.max(0, mathSelection.start - 64), mathSelection.start) : before.toString().slice(-64),
+      suffix: mathSelection?.end != null && answer ? answer.slice(mathSelection.end, mathSelection.end + 64) : after.toString().slice(0, 64),
+      nodeId: host.dataset.answerNode, expId: host.dataset.exp, rect: range.getBoundingClientRect() };
   }
   function showSelBar(s, at) {
     if (!s || s.quote.length < 1) return;
@@ -2173,8 +2258,9 @@
     } else {
       body = `<p class="muted insp-empty" style="margin:0;padding:10px 12px;font-size:12px">${total ? '点击节点查看详情；拖动空白处平移画布。' : '还没有节点。'}</p>`;
     }
-    const canNarrate = S.kinds.has('narration') && total > 0;
-    inspector.innerHTML = head + body + `<div class="inspector__cta"><button class="btn btn--primary" data-act="narrate" ${canNarrate ? '' : 'disabled'} title="${S.kinds.has('narration') ? '' : '当前镜像未启用串讲工作流'}">${icon('narrate')}生成串讲</button></div>`;
+    const hasNarration = documentNarrations().length > 0;
+    const canNarrate = S.kinds.has('narration') && total > 0 && !narrationPending.has(S.doc?.id);
+    inspector.innerHTML = head + body + narrationPanel() + `<div class="inspector__cta"><button class="btn btn--primary" data-act="${hasNarration ? 'narration-regenerate' : 'narrate'}" ${canNarrate ? '' : 'disabled'} title="${S.kinds.has('narration') ? '' : '当前镜像未启用串讲工作流'}">${icon(hasNarration ? 'redo' : 'narrate')}${hasNarration ? '重新生成' : '生成串讲'}</button></div>`;
   }
   inspector.addEventListener('click', action(async (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
@@ -2188,6 +2274,12 @@
       toast(status === 'mastered' ? '已标为掌握' : '已标为学习中');
     }
     if (act === 'narrate') await openNarration();
+    if (act === 'narration-regenerate') await regenerateNarration();
+    if (act === 'narration-prev' || act === 'narration-next') {
+      const pages = documentNarrations(), index = narrationIndex(pages);
+      const next = pages[index + (act === 'narration-prev' ? -1 : 1)];
+      if (next) { S.narrationPages[S.doc.id] = next.id; renderInspector(); }
+    }
     const edge = e.target.closest('[data-edge-delete]');
     if (edge) { await sync(api.del(`${projectPath()}/graph/edges/${p(edge.dataset.edgeDelete)}`)); await refreshGraph(); toast('已删除连接'); }
   }));
@@ -2201,19 +2293,86 @@
 
   /* ================= Narration ================= */
   const MAX_NARRATION_NODES = 10;
+  const narrationPending = new Set();
+  function rememberNarration(narration, projectId, documentId) {
+    if (S.project?.id !== projectId) return;
+    S.narrations = [narration, ...S.narrations.filter((nar) => nar.id !== narration.id)];
+    S.narrationPages[documentId] = narration.id;
+    renderInspector();
+  }
+  async function regenerateNarration() {
+    if (!S.project || !S.doc || !S.kinds.has('narration')) return;
+    const projectId = S.project.id, documentId = S.doc.id;
+    if (narrationPending.has(documentId)) return;
+    const tree = treeOrder();
+    const ids = docNodes().filter((n) => !n.parent_id && !meta(n).source?.fromNode)
+      .sort((a, b) => tree.indexOf(a) - tree.indexOf(b)).slice(0, MAX_NARRATION_NODES).map((n) => n.id);
+    if (!ids.length) { toast('请至少保留 1 个根节点'); return; }
+    const pages = documentNarrations(), current = pages[narrationIndex(pages)];
+    narrationPending.add(documentId);
+    renderInspector();
+    try {
+      const result = await api.run('narration', {
+        project_id: projectId, document_id: documentId, node_ids: ids,
+        ...(current?.title ? { title: current.title } : {}),
+      });
+      rememberNarration(result.narration, projectId, documentId);
+      toast('串讲已保存');
+    } finally {
+      narrationPending.delete(documentId);
+      renderInspector();
+    }
+  }
+  function documentNarrations(items = S.narrations, documentId = S.doc?.id) {
+    const ids = new Set(S.nodes.filter((n) => n.document_id === documentId).map((n) => n.id));
+    return items.filter((nar) => nar.segments?.some((segment) => ids.has(segment.node_id)))
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  }
+  function narrationIndex(pages) {
+    const index = pages.findIndex((nar) => nar.id === S.narrationPages[S.doc?.id]);
+    return index < 0 ? pages.length - 1 : index;
+  }
+  function narrationContent(nar) {
+    return renderNarration(nar.segments.map((s) => s.text).join('\n\n'))
+      .replaceAll('<strong>', '<strong style="display:inline;padding:1px 5px;border-radius:6px;background:var(--hl-yellow,#fff1a8);color:var(--ink,#111);box-decoration-break:clone">');
+  }
+  function narrationPanel() {
+    const pages = documentNarrations(), index = narrationIndex(pages), current = pages[index];
+    if (!current) return '';
+    return `<section class="inspector__narration" aria-label="已保存串讲" style="border-top:1px solid var(--line-soft);padding:10px 12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
+        <span class="label">串讲</span>
+        <span class="pager" role="group" aria-label="串讲版本" style="white-space:nowrap;flex-shrink:0">
+          <button class="icon-btn" data-act="narration-prev" ${index <= 0 ? 'disabled' : ''} aria-label="上一版串讲" title="上一版串讲">${icon('chev-l')}</button>
+          <span>${index + 1} / ${pages.length}</span>
+          <button class="icon-btn" data-act="narration-next" ${index >= pages.length - 1 ? 'disabled' : ''} aria-label="下一版串讲" title="下一版串讲">${icon('chev-r')}</button>
+        </span>
+      </div>
+      ${narrationPending.has(S.doc?.id) ? '<div class="gen" role="status">生成中</div>' : ''}
+      <div class="md" aria-live="polite" style="max-height:min(36vh,280px);overflow:auto;overflow-wrap:anywhere;font-size:12px;line-height:1.8">${narrationContent(current)}</div>
+    </section>`;
+  }
+  async function loadNarrations() {
+    S.narrations = S.kinds.has('narration') ? (await sync(api.get(`${projectPath()}/narrations`))).items || [] : [];
+  }
   const narrationMd = (nar) => [`# ${nar.title}`, '', `> ${nar.segment_count ?? nar.segments.length} 段 · 约 ${Math.round(nar.total_duration_seconds || 0)} 秒 · ${nar.provider}/${nar.model}`, '',
     ...nar.segments.flatMap((s, i) => [`## ${i + 1}. ${s.title}`, '', s.text, ''])].join('\n');
   async function openNarration() {
     if (!S.kinds.has('narration') || !docNodes().length) return;
-    const saved = (await sync(api.get(`${projectPath()}/narrations`))).items || [];
-    // Default order: prerequisites (deeper) first, then tree order.
+    await loadNarrations();
+    const projectId = S.project.id, documentId = S.doc.id;
+    const saved = documentNarrations().reverse();
+    renderInspector();
+    // Global narration uses only document roots; child cards are already folded into them.
     const tree = treeOrder();
-    let order = docNodes().sort((a, b) => depthOf(b) - depthOf(a) || tree.indexOf(a) - tree.indexOf(b))
+    const roots = docNodes().filter((n) => !n.parent_id && !meta(n).source?.fromNode);
+    if (!roots.length) return;
+    let order = roots.sort((a, b) => tree.indexOf(a) - tree.indexOf(b))
       .map((n, i) => ({ n, on: i < MAX_NARRATION_NODES }));
     let current = saved[0] || null, busy = false;
     const { root } = modal({
       title: '生成串讲', wide: true,
-      body: `<div class="narr">
+      body: `<style>@media(max-width:640px){.narr{grid-template-columns:minmax(0,1fr)!important}.narr>div{min-width:0;padding-left:0!important}.modal__foot{flex-wrap:wrap}}</style><div class="narr">
         <div><label class="field" style="margin-bottom:8px"><span class="label">标题（可选）</span><input class="input" id="narr-title" maxlength="200" placeholder="${esc(S.project.title)} 串讲"></label>
           <div class="label" id="narr-count" style="margin:8px 0 4px"></div>
           <ul class="narr__list" id="narr-list" aria-label="节点与顺序"></ul></div>
@@ -2221,7 +2380,7 @@
           <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><span class="label">已生成</span>
             <select class="input" id="narr-history" style="height:26px;flex:1" aria-label="历史串讲"></select></div>
           <div class="gen" id="narr-run" hidden></div>
-          <pre class="narr__preview" id="narr-prev" aria-live="polite"></pre></div></div>`,
+          <div class="narr__preview" id="narr-prev" aria-live="polite" style="white-space:normal"></div></div></div>`,
       actions: [
         { label: '复制', run: async () => { if (current) { await copyText(narrationMd(current)); toast('讲稿已复制'); } } },
         { label: '下载 .md', run: () => current && download(`${current.title}.md`, narrationMd(current)) },
@@ -2229,28 +2388,38 @@
         { label: '生成串讲', primary: true, id: 'narr-go', run: async (c, r, b) => {
           const ids = order.filter((o) => o.on).map((o) => o.n.id);
           if (!ids.length) { toast('请至少选择 1 个节点'); return; }
+          if (narrationPending.has(documentId)) { toast('串讲正在生成中'); return; }
+          narrationPending.add(documentId);
+          renderInspector();
           busy = true; b.disabled = true; paint();
           const title = $('#narr-title', r).value.trim();
           try {
-            const res = await api.run('narration', { project_id: S.project.id, node_ids: ids, ...(title ? { title } : {}) }, {
+            const res = await api.run('narration', { project_id: projectId, document_id: documentId, node_ids: ids, ...(title ? { title } : {}) }, {
               onRun: (v) => { const el = $('#narr-run', r); if (el) { el.hidden = false; el.textContent = `${{ queued: '排队中', running: '生成中' }[v.state] || v.state}${v.progress ? ' · ' + v.progress + '%' : ''}`; } },
             });
             current = res.narration; saved.unshift(current);
-            toast('串讲已生成');
-          } finally { busy = false; if (b.isConnected) { b.disabled = false; $('#narr-run', r).hidden = true; paint(); } }
+            rememberNarration(current, projectId, documentId);
+            toast('串讲已保存');
+          } finally { busy = false; narrationPending.delete(documentId); renderInspector(); if (b.isConnected) { b.disabled = false; $('#narr-run', r).hidden = true; paint(); } }
         } },
       ],
     });
     function paint() {
       const picked = order.filter((o) => o.on).length;
-      $('#narr-count', root).textContent = `已选 ${picked} / ${MAX_NARRATION_NODES} · 按讲述顺序`;
+      $('#narr-count', root).textContent = `已选 ${picked} / ${Math.min(order.length, MAX_NARRATION_NODES)} 个根节点 · 因果/递进顺序`;
       $('#narr-list', root).innerHTML = order.map((o, i) => `<li>
         <label class="check"><input type="checkbox" data-on="${i}" ${o.on ? 'checked' : ''} ${!o.on && picked >= MAX_NARRATION_NODES ? 'disabled' : ''} aria-label="包含 ${esc(o.n.title)}"></label>
-        <span class="t" title="${esc(o.n.title)}">${esc(o.n.title)}</span>
+        <span class="t" title="${esc(o.n.title)}">${nodeTitle(o.n.title, o.n)}</span>
         <button class="icon-btn" data-up="${i}" ${i ? '' : 'disabled'} aria-label="上移"><svg class="ic" style="transform:rotate(-90deg)"><use href="#i-chev-r"/></svg></button>
         <button class="icon-btn" data-down="${i}" ${i < order.length - 1 ? '' : 'disabled'} aria-label="下移"><svg class="ic" style="transform:rotate(90deg)"><use href="#i-chev-r"/></svg></button></li>`).join('');
       $('#narr-history', root).innerHTML = saved.length ? saved.map((x, i) => `<option value="${i}" ${x === current ? 'selected' : ''}>${esc(x.title)} · ${new Date(x.created_at).toLocaleString('zh-CN', { hour12: false })}</option>`).join('') : '<option>尚无串讲</option>';
-      $('#narr-prev', root).textContent = current ? narrationMd(current) : '选择节点并点击「生成串讲」。';
+      const preview = $('#narr-prev', root);
+      if (current) {
+        preview.innerHTML = renderNarration(current.segments.map((s) => s.text).join('\n\n'));
+        $$('strong', preview).forEach((el) => {
+          el.style.cssText = 'display:inline;padding:1px 5px;border-radius:6px;background:var(--hl-yellow,#fff1a8);color:var(--ink,#111);box-decoration-break:clone;';
+        });
+      } else preview.textContent = '';
       $$('.modal__foot .btn:not(.btn--primary)', root).forEach((b) => { b.disabled = !current || busy; });
     }
     $('#narr-list', root).addEventListener('click', (e) => {
@@ -2608,6 +2777,12 @@
   const TEXT_FORMATS = new Set(['md', 'txt']);
   async function documentText(doc) {
     if (TEXT_FORMATS.has(doc.format)) return { text: (await api.get(`/api/documents/${p(doc.id)}/content`)).text || '' };
+    if (doc.format === 'tex') {
+      const result = await api.post('/api/sources/resolve', { refs: [{ document_id: doc.id, revision_id: doc.current_revision_id, selector: { type: 'whole-document' } }] });
+      const resolved = result.items?.[0];
+      if (!resolved?.resolved || !resolved.citation?.file) throw Object.assign(new Error('无法读取 TeX 工程的主文件'), { code: 'content_not_available' });
+      return { text: resolved.text, file: resolved.citation.file };
+    }
     const read = async () => { const v = await api.get(`/api/documents/${p(doc.id)}/text`); return { text: v.text || '', version: v.extractor_version || null }; };
     try { return await read(); }
     catch (e) { if (e.code !== 'content_not_available') throw e; }
@@ -2627,8 +2802,8 @@
     const current = ++revision;
     const detail = await sync(api.get(`/api/documents/${p(id)}`));
     const doc = detail.document || detail;
-    let text, textVersion = null;
-    try { ({ text, version: textVersion } = await sync(documentText(doc))); }
+    let text, textVersion = null, textFile = null;
+    try { ({ text, version: textVersion, file: textFile } = await sync(documentText(doc))); }
     catch (e) {
       if (e.code !== 'content_not_available') throw e;
       text = `> ${e.message}`;
@@ -2637,7 +2812,7 @@
     }
     if (current !== revision) return;
     if (S.doc && S.doc.id !== id) S.views[S.doc.id] = { ...S.view };
-    S.doc = doc; S.text = text; S.textVersion = textVersion;
+    S.doc = doc; S.text = text; S.textVersion = textVersion; S.textFile = textFile;
     // View mode is remembered per document; a PDF opens in the real PDF view.
     S.mode = ['md', 'raw', 'pdf', 'code'].includes(S.modes[doc.id]) ? S.modes[doc.id] : doc.code_path ? 'code' : doc.format === 'pdf' ? 'pdf' : 'md';
     if (S.selected && !inDoc(nodeOf(S.selected))) S.selected = null;
@@ -2744,7 +2919,7 @@
     }
     const prefs = readJSON(prefKey(), {});
     highlights = readJSON(hlKey(), []);
-    S.doc = null; S.text = ''; S.selected = prefs.node || null; S.history = {};
+    S.doc = null; S.text = ''; S.selected = prefs.node || null; S.history = {}; S.narrations = []; S.narrationPages = {};
     S.modes = prefs.modes && typeof prefs.modes === 'object' ? prefs.modes : {};
     S.views = prefs.views && typeof prefs.views === 'object' ? prefs.views : {};
     S.view = { x: 16, y: 8, z: 0.85 };
@@ -2753,6 +2928,7 @@
     closeFind(); hideAsk();
     await refreshDocs();
     await loadHistory();
+    await loadNarrations();
     await refreshGraph();
     const docId = docOf(prefs.doc)?.id || S.docs[0]?.id;
     if (docId) await openDocument(docId); else { renderTree(); renderReader(); }
@@ -3044,9 +3220,12 @@
   $$('[data-tool]').forEach((b) => b.addEventListener('click', () => setTool(b.dataset.tool)));
   let visualDrag = null;
   scroller.addEventListener('pointerdown', (event) => {
-    if (S.tool !== 'visual' || !pdfv || event.button !== 0) return;
+    if (!pdfv || event.button !== 0 || S.modal) return;
     const page = event.target.closest('.pdfv-page');
     if (!page) return;
+    const visualFallback = S.tool === 'select' && event.pointerType !== 'touch' && api.runtime?.learning_features?.visual_selection &&
+      !event.target.closest('.textLayer span:not(.endOfContent), button, a');
+    if (S.tool !== 'visual' && !visualFallback) return;
     event.preventDefault(); hideAsk(); getSelection().removeAllRanges();
     const box = document.createElement('div'); box.className = 'visual-selection'; page.appendChild(box);
     visualDrag = { page, box, x: event.clientX, y: event.clientY, documentId: S.doc.id, revisionId: S.doc.current_revision_id };
@@ -3063,7 +3242,7 @@
     if (!visualDrag) return;
     const drag = visualDrag; visualDrag = null;
     const rect = drag.box.getBoundingClientRect(); drag.box.remove();
-    if (rect.width < 8 || rect.height < 8) return;
+    if (rect.width < 2 || rect.height < 4) return;
     const cropped = await pdfv.view.crop(Number(drag.page.dataset.page), rect);
     setTool('select');
     openAsk({ kind: 'visual', ...cropped, documentId: drag.documentId, revisionId: drag.revisionId,
