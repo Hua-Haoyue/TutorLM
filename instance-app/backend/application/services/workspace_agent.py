@@ -58,6 +58,24 @@ class WorkspaceAgent:
             conn.execute('INSERT INTO chat_threads VALUES(?,?,?)', (key, session_id, time.time()))
         return {'id': key}
 
+    def threads(self, session_id, limit=50):
+        """This session's conversations, most recently active first, titled by the first question."""
+        with self.app.store.transaction() as conn:
+            rows = conn.execute(
+                'SELECT t.id, t.created, MAX(m.created) AS updated, COUNT(m.id) AS messages, '
+                '(SELECT body FROM chat_messages f WHERE f.thread_id=t.id AND f.role=? ORDER BY f.id LIMIT 1) AS first '
+                'FROM chat_threads t LEFT JOIN chat_messages m ON m.thread_id=t.id '
+                'WHERE t.session_id=? GROUP BY t.id ORDER BY COALESCE(MAX(m.created), t.created) DESC LIMIT ?',
+                ('user', session_id, limit)).fetchall()
+        items = []
+        for row in rows:
+            first = json.loads(row['first']).get('text', '') if row['first'] else ''
+            title = ' '.join(first.split())
+            items.append({'id': row['id'], 'title': (title[:60] + '…') if len(title) > 60 else title,
+                          'created': row['created'], 'updated': row['updated'] or row['created'],
+                          'messages': row['messages']})
+        return items
+
     def history(self, thread_id, session_id):
         self.thread(thread_id, session_id)
         with self.app.store.transaction() as conn:

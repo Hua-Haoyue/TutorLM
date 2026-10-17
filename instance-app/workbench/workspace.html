@@ -29,7 +29,7 @@
 <link rel="stylesheet" href="assets/card-layout.css?v=workspace-tools-20261018-r1">
 <link rel="stylesheet" href="assets/card-clear.css?v=2">
 <link rel="stylesheet" href="assets/feynman.css?v=2">
-<link rel="stylesheet" href="assets/workspace-tools.css">
+<link rel="stylesheet" href="assets/workspace-tools.css?v=tabs-20261018">
 </head>
 <body>
 <div class="app" id="app">
@@ -45,7 +45,7 @@
       </button>
       <div class="menu" id="ws-menu" role="menu" hidden></div>
     </div>
-    <button class="tb-btn" id="workspace-chat-toggle" aria-pressed="false" aria-controls="workspace-chat">Chat</button>
+    <button class="icon-btn" id="workspace-chat-toggle" aria-pressed="false" aria-controls="workspace-chat" title="Chat" aria-label="打开 Chat"><svg class="ic"><use href="#i-chat"/></svg></button>
 
     <div class="topbar__right">
       <span class="ttl" id="ttl" title="试用剩余时间"><svg class="ic"><use href="#i-clock"/></svg><span id="ttl-v">--:--</span></span>
@@ -143,6 +143,7 @@
         </div>
       </div>
     </div>
+    <div class="doc-tabs" id="doc-tabs" hidden></div>
     <div class="drawbar" id="drawbar" role="toolbar" aria-label="绘图" hidden>
       <span class="label">画笔</span>
       <div class="drawbar__pens" id="draw-pens" role="radiogroup" aria-label="画笔"></div>
@@ -263,13 +264,14 @@
 <script src="assets/math-selection.js?v=math-20261018"></script>
 <script src="assets/markdown.js?v=math-20261018"></script>
 <script src="assets/highlight/highlight.min.js"></script>
-<script src="assets/code-workspace.js"></script>
+<script src="assets/code-workspace.js?v=tabs-20261018"></script>
+<script src="assets/doc-tabs.js?v=1"></script>
 <script src="assets/md-ir.js?v=math-20261018"></script>
 <script src="assets/dagre/dagre.min.js"></script>
 <script src="assets/graph-layout.js?v=workspace-tools-20261018-r1"></script>
 <script src="assets/card-layout.js?v=workspace-tools-20261018-r1"></script>
 <script src="assets/card-clear.js?v=2"></script>
-<script src="assets/runtime-workspace.js?v=merge-20261018-r1"></script>
-<script src="assets/workspace-chat.js"></script>
+<script src="assets/runtime-workspace.js?v=tabs-20261018-r1"></script>
+<script src="assets/workspace-chat.js?v=chat-20261018"></script>
 </body>
 </html>

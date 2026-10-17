@@ -1,5 +1,6 @@
 /reference/
 /sync/
+/video/
 
 # Local configuration and credentials
 .env

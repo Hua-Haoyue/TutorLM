@@ -63,6 +63,11 @@ def create_chat(session=Depends(require_session), state=Depends(get_state)):
     return state.services.agent.create(str(session['id']))
 
 
+@router.get('/chat/threads')
+def list_chats(session=Depends(require_session), state=Depends(get_state)):
+    return {'items': state.services.agent.threads(str(session['id']))}
+
+
 @router.get('/chat/threads/{thread_id}')
 def history(thread_id: str, session=Depends(require_session), state=Depends(get_state)):
     return state.services.agent.history(thread_id, str(session['id']))

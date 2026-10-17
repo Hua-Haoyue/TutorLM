@@ -292,10 +292,14 @@
     return `<header class="doc-head"><div class="mono"><span>${kindLabel}${kb ? ' · ' + kb : ''}</span><span>${anchored} 个节点</span></div>
       <h1>${esc(baseName(d.title))}</h1><p>${esc(d.source_filename || '手动创建')} · ${wordCount(S.text).toLocaleString()} 字</p></header>`;
   }
+  const isCodeDoc = (d) => !!window.TutorCode?.isCode(d);
   function syncViewSeg() {
+    const code = isCodeDoc(S.doc);
     $$('.seg [data-view]').forEach((b) => {
       b.setAttribute('aria-checked', String(b.dataset.view === S.mode));
-      b.disabled = !S.doc;
+      // A source file is only shown as code; the other views are greyed out.
+      b.disabled = !S.doc || (code && b.dataset.view !== 'code');
+      b.title = code && b.dataset.view !== 'code' ? '代码文件只能以 Code 视图阅读' : '';
     });
   }
   function renderReader(keepScroll) {
@@ -305,6 +309,7 @@
     resetFollowPosition();
     hideAsk();
     syncViewSeg();
+    $('#reader').classList.toggle('code-mode', !!S.doc && S.mode === 'code');
     if (!S.doc) {
       sheet.innerHTML = `<div class="empty-doc"><div class="mono muted">无打开的文档</div>
         <p>${S.docs.length ? '从左侧选择一个文档。' : '导入 .md / .txt，或新建文档粘贴正文，开始阅读。'}</p>
@@ -313,7 +318,7 @@
       return;
     }
     if (S.mode === 'code') {
-      sheet.innerHTML = docHead(S.doc) + '<div id="code-content"></div>';
+      sheet.innerHTML = '<div id="code-content"></div>';
       TutorCode.mount($('#code-content', sheet), { doc: S.doc, text: S.text, error: fail,
         save: async text => {
           const value = await api.request('/api/code/file', { method: 'PUT', body: {
@@ -1657,12 +1662,34 @@
     drawEdges(); drawConnector(); renderInspector(); drawMinimap();
   }
 
+  /* FLIP: a card re-rendered at a new size (opened / closed / enlarged) animates from
+     its previous box instead of jumping. Screen-space deltas are divided by the
+     canvas zoom because the card lives inside the scaled world. */
+  function flipCard(el, before) {
+    if (!el || !before || !before.width || !el.animate || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const after = el.getBoundingClientRect();
+    if (!after.width || !after.height) return;
+    const z = S.view.z || 1;
+    const dx = (before.left - after.left) / z, dy = (before.top - after.top) / z;
+    const sx = before.width / after.width, sy = before.height / after.height;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(sx - 1) < 0.01 && Math.abs(sy - 1) < 0.01) return;
+    el.getAnimations().forEach((a) => a.cancel());
+    const timing = { duration: 280, easing: 'cubic-bezier(.2,.8,.2,1)' };
+    el.animate([{ transformOrigin: '0 0', transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})` },
+      { transformOrigin: '0 0', transform: 'none' }], timing);
+    [...el.children].forEach((c) => c.animate([{ opacity: 0 }, { opacity: 1 }], { ...timing, duration: 220, delay: 60, fill: 'backwards' }));
+    let frames = 0;
+    (function redraw() { drawEdges(); drawConnector(); if (++frames < 20) requestAnimationFrame(redraw); })();
+  }
+  window.TLMFlipCard = flipCard;
   function selectNode(id, opts = {}) {
     const target = id && nodeOf(id);
     if (target && !inDoc(target)) { openDocument(target.document_id).then(() => selectNode(id, opts)).catch(fail); return; }
+    const before = new Map([S.selected, target ? id : null].filter(Boolean).map((x) => [x, elOf(nodeOf(x))?.getBoundingClientRect()]));
     S.selected = target ? id : null;
     hideSelBar();
     renderCanvas(); syncAnchorState();
+    before.forEach((rect, x) => flipCard(elOf(nodeOf(x)), rect));
     const n = nodeOf(S.selected);
     if (n && opts.center) ensureVisible(n);
     if (n && opts.reveal) revealSource(n);
@@ -2770,7 +2797,7 @@
     moveKeys(keys, dest).then(async (n) => { await refreshDocs(); renderTree(); if (n) toast(`已移动 ${n} 个文档到「${dest || '根目录'}」`); }).catch(fail);
   });
   treeEl.addEventListener('dragend', () => { treeDrag = null; $$('.t-item.drop', treeEl).forEach((x) => x.classList.remove('drop')); });
-  async function refreshDocs() { S.docs = (await sync(api.get(`${projectPath()}/documents`))).items || []; }
+  async function refreshDocs() { S.docs = (await sync(api.get(`${projectPath()}/documents`))).items || []; docTabs.prune(); }
   /* md/txt: whole text from /content. pdf/tex: extracted text from /text, queuing
      one extraction run when none exists yet. Nothing is substituted when the
      server has no text: the reader shows why. */
@@ -2812,15 +2839,66 @@
     }
     if (current !== revision) return;
     if (S.doc && S.doc.id !== id) S.views[S.doc.id] = { ...S.view };
-    S.doc = doc; S.text = text; S.textVersion = textVersion; S.textFile = textFile;
+    const previous = S.doc?.id || null;
+    S.doc = doc; S.text = text;
+    docTabs.show(doc.id, previous); S.textVersion = textVersion; S.textFile = textFile;
     // View mode is remembered per document; a PDF opens in the real PDF view.
-    S.mode = ['md', 'raw', 'pdf', 'code'].includes(S.modes[doc.id]) ? S.modes[doc.id] : doc.code_path ? 'code' : doc.format === 'pdf' ? 'pdf' : 'md';
+    S.mode = isCodeDoc(doc) ? 'code'
+      : ['md', 'raw', 'pdf', 'code'].includes(S.modes[doc.id]) ? S.modes[doc.id] : doc.format === 'pdf' ? 'pdf' : 'md';
     if (S.selected && !inDoc(nodeOf(S.selected))) S.selected = null;
     const saved = S.views[S.doc.id];
     S.view = saved && Number.isFinite(saved.z) ? { ...saved } : { x: 16, y: 8, z: 0.85 };
     closeFind(); renderTree(); renderReader(); relayout();
     if (!saved && docNodes().length) fitView();
     savePrefs();
+  }
+  /* Editor-style tabs above the page (assets/doc-tabs.js). */
+  const docTabs = TLMDocTabs.create({
+    host: $('#doc-tabs'),
+    storageKey: () => `tlm.tabs.${S.project?.id}`,
+    docs: () => S.docs,
+    current: () => S.doc?.id || null,
+    title: (d) => baseName(d.title),
+    icon: (d) => icon(d.format === 'pdf' ? 'file-pdf' : isCodeDoc(d) ? 'file-code' : 'file'),
+    open: (id) => openDocument(id).catch(fail),
+    closed: (next) => {
+      if (window.TutorCode?.dirty() && !confirm('代码尚未保存，放弃修改？')) { docTabs.show(S.doc.id); return; }
+      irEditor.finish();
+      if (next) { openDocument(next).catch(fail); return; }
+      irFlush().catch(fail);
+      if (S.doc) S.views[S.doc.id] = { ...S.view };
+      S.doc = null; S.text = ''; S.selected = null;
+      renderTree(); renderReader(); renderCanvas(); drawConnector(); savePrefs();
+    },
+    add: (anchor) => openTabPicker(anchor),
+  });
+  /* "+": open another document of the project, or create / import one. */
+  function openTabPicker(anchor) {
+    closeMenus();
+    $('.tab-picker')?.remove();
+    const open = new Set(docTabs.ids);
+    const menu = document.createElement('div');
+    menu.className = 'menu tab-picker'; menu.setAttribute('role', 'menu');
+    const docs = [...S.docs].sort((a, b) => Number(open.has(a.id)) - Number(open.has(b.id)) || a.title.localeCompare(b.title));
+    menu.innerHTML = `<div class="menu__section" style="padding:8px 12px"><span class="label">打开文档</span></div>
+      ${docs.map((d) => `<button class="menu__item" role="menuitem" data-pick="${esc(d.id)}">${icon(d.format === 'pdf' ? 'file-pdf' : isCodeDoc(d) ? 'file-code' : 'file')}<span>${esc(baseName(d.title))}</span>${open.has(d.id) ? '<span class="mono muted">已打开</span>' : ''}</button>`).join('') || '<div class="menu__section muted small">还没有文档</div>'}
+      <hr><button class="menu__item" role="menuitem" data-pick-new>${icon('file-plus')}新建文档</button>
+      <button class="menu__item" role="menuitem" data-pick-import>${icon('upload')}导入文件</button>`;
+    document.body.appendChild(menu);
+    const r = anchor.getBoundingClientRect();
+    menu.style.cssText = `position:fixed;z-index:120;top:${r.bottom + 4}px;left:${Math.max(8, Math.min(r.left, innerWidth - 340))}px;max-height:60vh;overflow:auto`;
+    menu.hidden = false;
+    const close = () => { menu.remove(); document.removeEventListener('mousedown', outside, true); };
+    const outside = (e) => { if (!menu.contains(e.target)) close(); };
+    setTimeout(() => document.addEventListener('mousedown', outside, true), 0);
+    menu.addEventListener('keydown', (e) => { if (e.key === 'Escape') { close(); anchor.focus(); } });
+    menu.addEventListener('click', action(async (e) => {
+      const pick = e.target.closest('[data-pick]');
+      if (pick) { close(); await openDocument(pick.dataset.pick); return; }
+      if (e.target.closest('[data-pick-new]')) { close(); newDocument(); return; }
+      if (e.target.closest('[data-pick-import]')) { close(); $('#file-input').click(); }
+    }));
+    $('.menu__item', menu)?.focus();
   }
   async function afterDocChange(docId) {
     await refreshDocs(); await refreshGraph();
@@ -2927,6 +3005,7 @@
     T.open = null; T.sel.clear(); T.clip = null;
     closeFind(); hideAsk();
     await refreshDocs();
+    docTabs.reset();
     await loadHistory();
     await loadNarrations();
     await refreshGraph();
@@ -3137,6 +3216,7 @@
     if (t === 'highlight') toast('高亮模式：选中文字即高亮（仅保存在本浏览器），点击已有高亮可移除');
   }
   function setView(v) { if (!S.doc) return; if (v === 'code' && !TEXT_FORMATS.has(S.doc.format)) { toast('Code 视图仅支持文本文件'); return; }
+    if (isCodeDoc(S.doc) && v !== 'code') return;
     if (window.TutorCode?.dirty() && !confirm('代码尚未保存，放弃修改？')) return;
     S.mode = v; S.modes[S.doc.id] = v; savePrefs(); renderReader(); }
 

@@ -167,18 +167,21 @@
         const before = current(n);
         ensureDefault(n, before.position);
         const after = { ...before, scale: before.scale === 1 ? LARGE : 1 };
-        const el = elOf(n), old = el?.getBoundingClientRect();
-        await saveOne(n, after, meta(n));
+        // Resize on screen first (animated from the old box), then save; a failed
+        // save puts the card back.
+        const baseMeta = meta(n), old = elOf(n)?.getBoundingClientRect();
+        n.metadata = { ...baseMeta, layout_scale: after.scale };
         renderCard(n);
-        if (el && old && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-          const width = old.width / state.view.z, height = old.height / state.view.z;
-          const finalWidth = el.offsetWidth, finalHeight = el.offsetHeight;
-          const animation = el.animate([{ width: width + 'px', height: height + 'px' },
-            { width: finalWidth + 'px', height: finalHeight + 'px' }], { duration: 280, easing: 'cubic-bezier(.2,.7,.2,1)' });
-          frameRedraw(320);
-          await animation.finished.catch(() => {});
-        } else frameRedraw(0);
-        ensureVisible(n);
+        window.TLMFlipCard?.(elOf(n), old);
+        frameRedraw(320);
+        try { await saveOne(n, after, baseMeta); }
+        catch (error) {
+          const back = elOf(n)?.getBoundingClientRect();
+          n.metadata = baseMeta; renderCard(n); window.TLMFlipCard?.(elOf(n), back);
+          throw error;
+        }
+        renderCard(n);
+        setTimeout(() => { if (state.selected === n.id) ensureVisible(n); }, 300);
         record('resize', [before], [after]);
         toast(after.scale === LARGE ? '已放大卡片' : '已恢复正常大小');
       } finally { busy = false; refreshUndo(); }

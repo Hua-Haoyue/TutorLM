@@ -91,7 +91,7 @@ const output = path.resolve(__dirname, '../.work/workspace-tools');
     const panel = page.locator('#workspace-chat'); await panel.waitFor();
     await panel.getByRole('textbox', {name:'Chat 消息'}).fill('请概括代码工程');
     await panel.getByRole('button', {name:'发送消息',exact:true}).click();
-    await page.waitForSelector('.workspace-chat-message.assistant');
+    await page.waitForSelector('.workspace-chat-message.assistant:not(.waiting)');
     assert((await panel.innerText()).includes('离线 Chat'));
     const before = await panel.boundingBox(), head = await panel.locator('header').boundingBox();
     await page.mouse.move(head.x+55,head.y+15); await page.mouse.down(); await page.mouse.move(head.x-140,head.y+90,{steps:10}); await page.mouse.up();

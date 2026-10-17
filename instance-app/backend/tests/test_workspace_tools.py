@@ -285,3 +285,19 @@ def test_tools_require_session_and_search_respects_web_switch(client, session_he
     monkeypatch.setattr(app.provider, 'research', lambda *_: pytest.fail('Unexpected web access'))
     monkeypatch.setattr(app.provider, 'agent_step', lambda *_: output('offline'))
     assert chat(client, session_headers, wait_for_run, thread)['state'] == 'completed'
+
+
+def test_chat_thread_list_is_titled_ordered_and_session_scoped(client, session_headers, wait_for_run, monkeypatch):
+    app = client.app.state.tutorlm.services
+    monkeypatch.setattr(app.provider, 'agent_step', lambda *_: output('Reply'))
+    first = start_chat(client, session_headers)
+    chat(client, session_headers, wait_for_run, first, message='  What does   the allocator do?  ')
+    second = start_chat(client, session_headers)
+    items = client.get('/api/chat/threads', headers=session_headers).json()['items']
+    assert [item['id'] for item in items][:2] == [second, first]
+    assert items[1]['title'] == 'What does the allocator do?' and items[1]['messages'] == 2
+    assert items[0]['title'] == '' and items[0]['messages'] == 0
+    chat(client, session_headers, wait_for_run, first, message='And the store?')
+    assert client.get('/api/chat/threads', headers=session_headers).json()['items'][0]['id'] == first
+    token = client.post('/api/sessions', json={'invite_code': 'TLM-DEMO-TEST'}).json()['access_token']
+    assert client.get('/api/chat/threads', headers={'Authorization': 'Bearer ' + token}).json()['items'] == []

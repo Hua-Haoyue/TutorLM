@@ -63,6 +63,7 @@ function projectFixture(managed) {
   const name = { textContent: '' }, usage = { textContent: '' };
   const calls = [];
   const context = {
+    docTabs: { reset() {}, show() {}, prune() {} },
     revision: 0, highlights: [],
     S: { projects: [{ id: 'app-project', title: '我的工作区' }], docs: [] },
     api: { managed, lease: { workspace_id: 'workspace-a' },
