@@ -1470,7 +1470,11 @@
   }
   function chatOf(n) {
     const pg = new Set(pagesOf(n).map((h) => h.id));
-    return (S.history[n.id] || []).filter((h) => !pg.has(h.id)).reverse().sort(byTime);
+    return (S.history[n.id] || []).filter((h) => {
+      if (pg.has(h.id)) return false;
+      const question = meta(n).explanation_questions?.[h.id]?.question ?? h.question;
+      return userAsked(question);
+    }).reverse().sort(byTime);
   }
   function pageIndex(n) {
     const len = pagesOf(n).length, i = meta(n).page;
