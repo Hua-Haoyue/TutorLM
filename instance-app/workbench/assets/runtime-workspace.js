@@ -1949,6 +1949,8 @@
     if (child && getSelection().isCollapsed) { selectNode(child.dataset.child, { center: true }); return; }
     const nEl = e.target.closest('.gnode'), n = nEl && nodeOf(nEl.dataset.id);
     if (!n) return;
+    // A collapsed card is a single expand target: clicking any part opens it.
+    if (!nEl.classList.contains('sel')) { selectNode(n.id); return; }
     const act = e.target.closest('[data-act]')?.dataset.act;
     const depth = e.target.closest('[data-depth]')?.dataset.depth;
     if (depth && !running(n.id)) { await patchMeta(n, { explanation_depth: depth }); renderNode(n.id); return; }
@@ -2356,7 +2358,7 @@
     const open = localStorage.getItem('tlm.insp') === '1';
     inspector.classList.toggle('open', open);
     const head = `<div class="inspector__head"><span class="label">检查器</span><span class="mono muted" style="margin-left:auto">${mastered} / ${total} 已掌握</span>
-      <button class="icon-btn" data-act="insp-toggle" aria-expanded="${open}" title="${open ? '收起' : '展开'}检查器">${icon('chev-ud')}</button></div>`;
+      <button class="icon-btn" data-act="focus-canvas" aria-pressed="${app.classList.contains('focus')}" title="专注画布">${icon('expand')}</button></div>`;
     let body;
     if (n) {
       const rels = S.edges.filter((e) => e.source_node_id === n.id || e.target_node_id === n.id);
@@ -2375,7 +2377,7 @@
           <button class="btn btn--sm" data-act="node-master" aria-pressed="${meta(n).status === 'mastered'}">${meta(n).status === 'mastered' ? '标为学习中' : '标为已掌握'}</button>
         </div>`;
     } else {
-      body = `<p class="muted insp-empty" style="margin:0;padding:10px 12px;font-size:12px">${total ? '点击节点查看详情；拖动空白处平移画布。' : '还没有节点。'}</p>`;
+      body = total ? '' : `<p class="muted insp-empty" style="margin:0;padding:10px 12px;font-size:12px">还没有节点。</p>`;
     }
     const hasNarration = documentNarrations().length > 0;
     const pending = narrationPending.has(S.doc?.id);
@@ -2390,6 +2392,7 @@
     const act = e.target.closest('[data-act]')?.dataset.act;
     const n = nodeOf(S.selected);
     if (act === 'insp-toggle') { localStorage.setItem('tlm.insp', inspector.classList.contains('open') ? '0' : '1'); renderInspector(); return; }
+    if (act === 'focus-canvas') { setFocusMode(!app.classList.contains('focus')); return; }
     if (act === 'node-reveal' && n) revealSource(n);
     if (act === 'node-master' && n) {
       const status = meta(n).status === 'mastered' ? 'learning' : 'mastered';
