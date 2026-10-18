@@ -1145,6 +1145,16 @@ class AppServices:
         session_id: str,
     ) -> dict[str, Any]:
         """Queue a registered plugin workflow for the workspace-bound project."""
+        if kind == 'auto_relations':
+            from backend.application.services.auto_relations import AutoRelationsService
+            AutoRelationsService(self).validate_input(dict(input_payload))
+            run = self.runs.submit(
+                kind=kind, workload='model', input_payload=dict(input_payload),
+                project_id=self.current_project()['id'], session_id=session_id,
+                idempotency_key=idempotency_key, idempotency_scope=f'workspace:{self.workspace_id}',
+                target_id=input_payload.get('node_id') or input_payload['document_id'],
+            )
+            return self.run_public(run)
         if kind == 'workspace_chat':
             self.agent.validate(dict(input_payload), session_id)
             run = self.runs.submit(kind=kind, workload='model', input_payload=dict(input_payload),
@@ -1238,6 +1248,8 @@ class AppServices:
     def _register_handlers(self) -> None:
         from backend.application.services.feynman import FeynmanService
         self.runs.register('feynman', FeynmanService(self).handle)
+        from backend.application.services.auto_relations import AutoRelationsService
+        self.runs.register('auto_relations', AutoRelationsService(self).handle)
         for kind in self.plugins.executable_kinds():
             self.runs.register(kind, self._handle_plugin)
         self.runs.register("extract", self._handle_extract)

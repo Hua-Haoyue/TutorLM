@@ -1120,7 +1120,7 @@
     S.edges.forEach((e) => {
       if (e.relation === 'parent_of' && tree.has(e.source_node_id + '>' + e.target_node_id)) return;
       const a = nodeOf(e.source_node_id), b = nodeOf(e.target_node_id);
-      if (inDoc(a) && inDoc(b)) list.push({ a, b, rel: e.relation });
+      if (inDoc(a) && inDoc(b)) list.push({ a, b, rel: e.relation, auto: e.metadata?.auto_relations === true });
     });
     return list;
   }
@@ -1179,7 +1179,7 @@
       const forward = safeRoutes(e.a).find(route => route.to === e.b.id);
       const backward = safeRoutes(e.b).find(route => route.to === e.a.id);
       const routed = forward || backward;
-      if (routed) {
+      if (routed && !e.auto) {
         const first = forward ? A : B, last = forward ? B : A;
         const stillPlaced = Math.abs(first.x - routed.source.x) < 2 && Math.abs(first.y - routed.source.y) < 2
           && Math.abs(last.x - routed.target.x) < 2 && Math.abs(last.y - routed.target.y) < 2;
@@ -1204,9 +1204,13 @@
       }
       const on = S.selected && (e.a.id === S.selected || e.b.id === S.selected);
       if (!e.rel) return `<path class="${on ? 'on' : ''}" marker-end="url(#arrow)" d="${d}"/>`;
+      if (e.auto) {
+        labelX = e.vertical ? (x1 + x2) / 2 : (x1 + 3 * (x1 + dx) + 3 * c2 + x2) / 8;
+        labelY = (e.y1 + e.y2) / 2;
+      }
       const label = esc(REL[e.rel] || e.rel);
-      return `<path class="rel ${on ? 'on' : ''}" marker-end="url(#arrow)" d="${d}"><title>${label}</title></path>
-        <text class="rel-label" x="${labelX}" y="${labelY}" text-anchor="middle">${label}</text>`;
+      return `<path class="rel ${e.auto ? 'auto-rel' : ''} ${on ? 'on' : ''}" marker-end="url(#arrow)" d="${d}"><title>${label}</title></path>
+        <text class="rel-label ${e.auto ? 'auto-rel-label' : ''}" x="${labelX}" y="${labelY}" text-anchor="middle" ${e.auto ? 'dominant-baseline="middle"' : ''}>${label}</text>`;
     });
     $('#edge-g').innerHTML = parts.join('');
   }
@@ -1854,6 +1858,7 @@
         status: 'learning', position: initialPosition, layout_default: { ...initialPosition, scale: 1 }, pages: [] },
     }));
     S.nodes.push(node);
+    autoRelateNode(node);
     if (visualSource?.selector?.type === 'whole-image') renderVisualOriginal().catch(fail);
     selectNode(node.id); ensureVisible(node); refreshMarks(); renderTree();
     if (parent) renderNode(parent.id);
@@ -2227,6 +2232,18 @@
     await sync(api.put('/api/learning/profile', { expected_revision: profile.revision, profile: { education_stage: stage } }));
     return true;
   }
+  function autoRelateNode(node) {
+    const projectId = S.project.id;
+    api.run('auto_relations', { document_id: node.document_id, node_id: node.id },
+      { key: `auto-relations-v1:${node.id}` }).then(async (result) => {
+      if (S.project?.id === projectId) {
+        await refreshGraph();
+        if (result.added) toast(`已自动连接 ${result.added} 条关系`);
+      }
+    }).catch(() => {
+      if (S.project?.id === projectId) toast('自动连线未完成，可点击 AI 梳理关系重试');
+    });
+  }
   let relationsBusy = false;
   async function organizeRelations() {
     if (relationsBusy) return;
@@ -2241,6 +2258,13 @@
     const pending = modal({ title: 'AI 梳理关系', body: '<p role="status">正在梳理…</p>',
       actions: [{ label: '取消', run: (close) => { close(); if (runId) api.cancel(runId).catch(fail); } }] });
     try {
+      const automatic = await api.run('auto_relations', { document_id: documentId }, { onRun: (run) => {
+        runId = run.id;
+        if (!pending.root.isConnected && !api.TERMINAL.has(run.state)) api.cancel(runId).catch(() => {});
+      } });
+      if (!pending.root.isConnected || S.project?.id !== projectId || S.doc?.id !== documentId) return;
+      await refreshGraph();
+      if (automatic.added) toast(`已自动连接 ${automatic.added} 条关系${automatic.restored ? `，补回 ${automatic.restored} 条` : ''}`);
       const result = await api.run('graph_relations', { document_id: documentId }, { onRun: (run) => {
         runId = run.id;
         if (!pending.root.isConnected && !api.TERMINAL.has(run.state)) api.cancel(run.id).catch(() => {});

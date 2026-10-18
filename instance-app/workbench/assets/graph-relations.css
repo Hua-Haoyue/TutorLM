@@ -1,4 +1,6 @@
 .relation-review { display: grid; gap: 0; }
+.edges path.auto-rel { stroke-dasharray: 6 5; stroke-width: 1.5; }
+.edges .auto-rel-label { font-family: var(--serif); font-size: 14px; letter-spacing: 0; stroke: var(--paper); stroke-width: 6px; stroke-linejoin: round; paint-order: stroke fill; }
 .relation-review__item { display: flex; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--border, #d9dde2); cursor: pointer; align-items: flex-start; }
 .relation-review__item input { flex: 0 0 16px; width: 16px; height: 16px; margin-top: 3px; }
 .relation-review__content { display: grid; gap: 7px; min-width: 0; overflow-wrap: anywhere; font-size: 13px; line-height: 1.6; }
