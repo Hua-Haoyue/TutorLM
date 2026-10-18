@@ -185,6 +185,7 @@ def _build_parser() -> argparse.ArgumentParser:
     invitation_create = invitation_sub.add_parser("create")
     connection_options(invitation_create)
     invitation_create.add_argument("--label", default="")
+    invitation_create.add_argument("--code", default=None, help="named code to use instead of a random one, e.g. TUTORLM-DONGNIYISI")
     invitation_delete = invitation_sub.add_parser("delete")
     connection_options(invitation_delete)
     invitation_delete.add_argument("invitation_id")
@@ -263,7 +264,8 @@ def _run_management(args: argparse.Namespace, client: ControlPlaneHTTP) -> Any:
         if args.invitations_command == "list":
             return client.request("GET", "/control/admin/invitations")
         if args.invitations_command == "create":
-            return client.request("POST", "/control/admin/invitations", payload={"label": args.label})
+            payload = {"label": args.label, **({"code": args.code} if args.code else {})}
+            return client.request("POST", "/control/admin/invitations", payload=payload)
         return client.request("DELETE", f"/control/admin/invitations/{args.invitation_id}")
     if command == "shares":
         if args.shares_command == "create":

@@ -668,3 +668,52 @@ def test_failed_copy_is_not_published_and_source_is_untouched(sharing):
     adapter.fail_copy.clear()
     retried = service.import_share(user_id=user_id, code=code)
     assert retried.workspace.state == "active"
+
+
+# ------------------------------------------------------------------ 命名系统码
+def test_named_system_code_from_config_grants_priority_case_insensitively(tmp_path: Path):
+    config = ControlPlaneConfig.for_tests(tmp_path, slots=2, system_invitation_codes=("TUTORLM-DONGNIYISI",))
+    app = create_app(config, adapter=FakeRuntimeAdapter(), run_startup_tasks=True)   # seeds configured codes
+    with TestClient(app) as admin:
+        a, b = TestClient(app), TestClient(app)
+        assert a.post("/control/leases", json={"label": "a"}).status_code == 201
+        assert b.post("/control/leases", json={"label": "b"}).status_code == 201
+        c = TestClient(app)
+        # People type it: lower case and spaces around it still work.
+        response = c.post("/control/leases", json={"label": "c", "invitation_code": "  tutorlm-dongniyisi "})
+        assert response.status_code == 201, response.text
+        assert response.json()["lease"]["priority"] > 0
+        assert len(_active_leases(admin)) == 2
+        listed = admin.get("/control/admin/invitations", headers=ADMIN).json()["items"]
+        assert any(item.get("code_prefix") == "NAMED" and item.get("label") == "configured" for item in listed), listed
+        assert "TUTORLM-DONGNIYISI" not in str(listed), "the plaintext code is never listed"
+
+
+def test_admin_can_issue_a_named_code_once(tmp_path: Path):
+    app, _adapter = _app_with_admin(tmp_path)
+    with TestClient(app) as admin:
+        created = admin.post("/control/admin/invitations", headers=ADMIN, json={"label": "roadshow", "code": "TutorLM-Roadshow-2026"})
+        assert created.status_code == 201, created.text
+        assert created.json()["code"] == "TUTORLM-ROADSHOW-2026"
+        again = admin.post("/control/admin/invitations", headers=ADMIN, json={"code": "TUTORLM-ROADSHOW-2026"})
+        assert again.status_code == 409, again.text
+        visitor = TestClient(app)
+        assert visitor.post("/control/leases", json={"invitation_code": "TUTORLM-ROADSHOW-2026"}).status_code == 201
+        # Revoking makes it stop working, and it cannot be issued again.
+        item = next(i for i in admin.get("/control/admin/invitations", headers=ADMIN).json()["items"] if i["label"] == "roadshow")
+        assert admin.delete(f"/control/admin/invitations/{item['invitation_id']}", headers=ADMIN).status_code in (200, 204)
+        late = TestClient(app)
+        assert late.post("/control/leases", json={"invitation_code": "TUTORLM-ROADSHOW-2026"}).status_code in (401, 403)
+        assert admin.post("/control/admin/invitations", headers=ADMIN, json={"code": "TUTORLM-ROADSHOW-2026"}).status_code == 409
+
+
+@pytest.mark.parametrize("code", ["SHORT-CODE", "tutorlm", "TLM-SYS-ROADSHOW-2026", "TLM-SHARE-ROADSHOW-1",
+                                  "TUTORLM DONGNIYISI", "TUTORLM_DONGNIYISI", "-TUTORLM-DONGNIYISI", "A" * 70 + "-B"])
+def test_unsafe_or_ambiguous_named_codes_are_rejected(tmp_path: Path, code: str):
+    app, _adapter = _app_with_admin(tmp_path)
+    with TestClient(app) as admin:
+        response = admin.post("/control/admin/invitations", headers=ADMIN, json={"code": code})
+        assert response.status_code in (400, 401, 403, 422), (code, response.text)
+    # Configuration is just as strict (codes there are written as-is).
+    with pytest.raises(ConfigError):
+        ControlPlaneConfig.for_tests(tmp_path, system_invitation_codes=(code,))

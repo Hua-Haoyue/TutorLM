@@ -12,7 +12,7 @@ Layout (TOML)::
     [control_plane]
     invitationonly = true
     slots = 4
-    system_invitation_codes = ["TLM-SYS-v1-..."]   # core-generated only
+    system_invitation_codes = ["TLM-SYS-v1-..."]   # core-generated, or a named code such as "TUTORLM-DONGNIYISI"
 
     [instance_env]
     RUN_MODE = "demo"                # -> TUTORLM_RUN_MODE in the container

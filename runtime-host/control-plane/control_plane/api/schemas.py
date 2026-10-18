@@ -107,6 +107,8 @@ class AccessPolicyResponse(BaseModel):
 
 class InvitationCreateRequest(BaseModel):
     label: str = Field(default="", max_length=64)
+    #: Optional named code chosen by the admin (e.g. TUTORLM-DONGNIYISI); random when absent.
+    code: str | None = Field(default=None, min_length=12, max_length=64)
 
 
 class ShareInvitationCreateRequest(BaseModel):

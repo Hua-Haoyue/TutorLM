@@ -42,7 +42,7 @@ def create_invitation(
     service: InvitationService = Depends(get_invitations),
 ) -> dict:
     label = payload.label if payload is not None else ''
-    invitation, code = service.issue_system_code(label=label)
+    invitation, code = service.issue_system_code(label=label, code=payload.code if payload is not None else None)
     return {
         'invitation': invitation.to_dict(now=service._store._clock()),
         'code': code,

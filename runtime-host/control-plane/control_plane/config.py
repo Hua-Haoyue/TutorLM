@@ -67,6 +67,11 @@ SYSTEM_INVITATION_CODE_FORMAT = (
 )
 
 
+#: 管理员手动指定的命名系统码（与 ``invitations.NAMED_CODE_RE`` 一致），
+#: 例如 ``TUTORLM-DONGNIYISI``。
+NAMED_SYSTEM_INVITATION_CODE_RE = re.compile(r"^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+){1,5}$")
+
+
 def is_valid_system_invitation_code(value: str) -> bool:
     """严格校验系统邀请码格式（与邀请核心的 ``SYSTEM_CODE_RE`` 逐字符一致）。
 
@@ -75,7 +80,12 @@ def is_valid_system_invitation_code(value: str) -> bool:
     加比核心更严的额外规则（否则会出现"核心签发但配置拒绝"的分歧）。
     """
 
-    return isinstance(value, str) and SYSTEM_INVITATION_CODE_RE.match(value) is not None
+    if not isinstance(value, str):
+        return False
+    if SYSTEM_INVITATION_CODE_RE.match(value):
+        return True
+    return (12 <= len(value) <= 64 and NAMED_SYSTEM_INVITATION_CODE_RE.match(value) is not None
+            and not value.startswith(("TLM-SYS-", "TLM-SHARE-")))
 
 
 def parse_system_invitation_codes(raw: Any) -> tuple[str, ...]:
@@ -122,8 +132,8 @@ def parse_system_invitation_codes(raw: Any) -> tuple[str, ...]:
             raise ConfigError("system_invitation_codes 不允许空字符串条目")
         if not is_valid_system_invitation_code(code):
             raise ConfigError(
-                f"系统邀请码格式非法：必须形如 {SYSTEM_INVITATION_CODE_FORMAT}。"
-                "请用 CLI/邀请核心生成，不要手写。"
+                f"系统邀请码格式非法：必须形如 {SYSTEM_INVITATION_CODE_FORMAT}，"
+                "或 12–64 位大写字母、数字与连字符组成的命名码（如 TUTORLM-DONGNIYISI）。"
             )
         if code in seen:
             raise ConfigError("system_invitation_codes 含重复条目")

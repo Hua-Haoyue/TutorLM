@@ -163,6 +163,32 @@
         </div>
       </div>
     </div>
+    <div class="wrap examples-wrap">
+      <div class="examples" aria-labelledby="examples-title">
+        <div class="examples__head">
+          <h2 id="examples-title">或者，从一个案例开始</h2>
+          <p>五份已经圈画、解释、追问并串讲好的示例笔记。点击卡片，得到属于你的独立副本，随意继续提问。</p>
+        </div>
+        <div class="examples__grid" id="examples"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="promo" aria-labelledby="promo-title">
+    <div class="wrap">
+      <div class="promo__head">
+        <span class="card__idx">宣传片 · 60 秒</span>
+        <h2 id="promo-title">一分钟，看懂 TutorLM。</h2>
+        <p>圈画即提问、层层追问、知识成图、一键串讲与费曼检验，一次看完。</p>
+      </div>
+      <div class="promo__frame">
+        <video class="promo__video" controls playsinline preload="none" poster="assets/promo-poster.jpg"
+               aria-label="TutorLM 60 秒宣传片">
+          <source src="assets/promo-60s.mp4" type="video/mp4">
+          你的浏览器无法播放这段视频，可以<a href="assets/promo-60s.mp4">直接下载</a>观看。
+        </video>
+      </div>
+    </div>
   </section>
 
   <section class="showcase" aria-label="演示">
@@ -309,6 +335,7 @@
 <script src="assets/common.js"></script>
 <script src="assets/api.js"></script>
 <script src="assets/entry.js"></script>
+<script src="assets/examples.js"></script>
 <script src="assets/site.js"></script>
 <script type="module">
   import { mountCoverWriting } from './assets/cover-writing.js';

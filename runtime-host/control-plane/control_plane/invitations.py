@@ -25,6 +25,7 @@ from control_plane.errors import (
     ConfigError,
     Forbidden,
     InvalidInvitation,
+    InvitationConflict,
     InvitationExpired,
     InvitationRequired,
     NotFound,
@@ -46,6 +47,18 @@ _PAYLOAD_RE = r"[A-Za-z0-9_-]{%d}" % _ENTROPY_CHARS
 #: 本模块签发的带版本、至少 256 bit 的格式。
 SYSTEM_CODE_RE = re.compile(rf"^{SYSTEM_CODE_PREFIX}-v(\d+)-({_PAYLOAD_RE})$")
 SHARE_CODE_RE = re.compile(rf"^{SHARE_CODE_PREFIX}-v(\d+)-({_PAYLOAD_RE})$")
+#: 运维手动指定的"命名"系统码，例如 ``TUTORLM-DONGNIYISI``：大写字母/数字，
+#: 至少两段、用连字符分隔，12–64 位，且不能占用签发格式的前缀。它比随机码
+#: 弱得多（可被猜测），只应在明确需要一个好记的码时由管理员配置。
+NAMED_CODE_RE = re.compile(r"^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+){1,5}$")
+NAMED_CODE_MIN, NAMED_CODE_MAX = 12, 64
+NAMED_CODE_PREFIX = "NAMED"
+
+
+def is_named_code_format(code: str) -> bool:
+    return (isinstance(code, str) and NAMED_CODE_MIN <= len(code) <= NAMED_CODE_MAX
+            and NAMED_CODE_RE.match(code) is not None
+            and not code.startswith((f"{SYSTEM_CODE_PREFIX}-", f"{SHARE_CODE_PREFIX}-")))
 
 #: 系统码入场后的服务端优先级。客户端提交的任何 priority 都被忽略。
 SYSTEM_PRIORITY = 100
@@ -62,11 +75,11 @@ MAX_CODE_LENGTH = 128
 def is_system_code_format(code: str) -> bool:
     """是否符合系统码格式。
 
-    全仓只有一个系统码格式：``TLM-SYS-v<digits>-<43 位 base64url>``。
-    config 与 CLI 都使用同一个模式，不存在兼容分支。
+    签发格式 ``TLM-SYS-v<digits>-<43 位 base64url>``，或管理员手动指定的
+    命名码（见 ``NAMED_CODE_RE``）。
     """
 
-    return SYSTEM_CODE_RE.match(code) is not None
+    return SYSTEM_CODE_RE.match(code) is not None or is_named_code_format(code)
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,8 +138,8 @@ class AccessPolicy:
             if not is_system_code_format(code):
                 raise ConfigError(
                     "配置中的系统邀请码不符合合法格式"
-                    "（TLM-SYS-...），已拒绝启动（不接受弱人工字符串作为"
-                    "系统优先级凭证）"
+                    "（TLM-SYS-... 或 12–64 位大写字母、数字与连字符组成的命名码，"
+                    "如 TUTORLM-DONGNIYISI），已拒绝启动"
                 )
 
 
@@ -151,7 +164,7 @@ def code_prefix_of(code: str) -> str:
 
     match = SYSTEM_CODE_RE.match(code) or SHARE_CODE_RE.match(code)
     if match is None:
-        return ""
+        return NAMED_CODE_PREFIX if is_named_code_format(code) else ""
     return f"{code.split('-v')[0]}-v{match.group(1)}"
 
 
@@ -208,10 +221,24 @@ class InvitationService:
         return report
 
     # ------------------------------------------------------------ 签发
-    def issue_system_code(self, *, label: str = "") -> tuple[Invitation, str]:
-        """签发一个新的系统码。明文仅在这里返回一次。"""
+    def issue_system_code(self, *, label: str = "", code: str | None = None) -> tuple[Invitation, str]:
+        """签发一个新的系统码。明文仅在这里返回一次。
 
-        code = generate_system_code()
+        ``code`` 为空时生成 256 bit 随机码；也可以由管理员指定一个命名码。
+        """
+
+        if code is None:
+            code = generate_system_code()
+        else:
+            code = code.strip().upper()
+            if not is_named_code_format(code):
+                raise InvalidInvitation(
+                    "自定义系统码须为 12–64 位大写字母、数字和连字符，至少两段，"
+                    "例如 TUTORLM-DONGNIYISI；不能以 TLM-SYS- 或 TLM-SHARE- 开头"
+                )
+            digest = verification_hash(code, InvitationKind.SYSTEM, self._pepper)
+            if self._store.invitation_tombstone_exists(digest):
+                raise InvitationConflict("这个系统码已经存在或曾被撤销，请换一个")
         invitation = self._store.create_invitation(
             invitation_id=str(uuid.uuid4()),
             kind=str(InvitationKind.SYSTEM),
@@ -286,6 +313,9 @@ class InvitationService:
             kind = str(InvitationKind.SYSTEM)
         elif SHARE_CODE_RE.match(code):
             kind = str(InvitationKind.SHARE)
+        elif is_named_code_format(code.strip().upper()):
+            # Named codes are typed by people: case and surrounding spaces do not matter.
+            code, kind = code.strip().upper(), str(InvitationKind.SYSTEM)
         else:
             raise InvalidInvitation("邀请码无效")
         if expected_kind is not None and kind != expected_kind:
@@ -342,7 +372,9 @@ class InvitationService:
                 return Admission(allowed=True, priority=DEFAULT_PRIORITY)
             raise InvitationRequired("当前仅开放邀请码入场，请填写有效邀请码")
         raw = str(code).strip()
-        if SYSTEM_CODE_RE.match(raw):
+        if is_named_code_format(raw.upper()):
+            raw = raw.upper()      # named codes are typed by people: case does not matter
+        if SYSTEM_CODE_RE.match(raw) or is_named_code_format(raw):
             invitation = self.verify_system(raw)
             self._store.register_invitation_use(invitation.invitation_id)
             return Admission(
