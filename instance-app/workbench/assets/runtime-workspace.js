@@ -2421,12 +2421,6 @@
     }
     if (act === 'narrate') await openNarration();
     if (act === 'narration-regenerate') await regenerateNarration();
-    if (act === 'narration-toggle') {
-      const key = `tlm.narration.collapsed.${S.doc?.id || ''}`;
-      localStorage.setItem(key, localStorage.getItem(key) === '1' ? '0' : '1');
-      renderInspector();
-      return;
-    }
     if (act === 'narration-prev' || act === 'narration-next') {
       const pages = documentNarrations(), index = narrationIndex(pages);
       const next = pages[index + (act === 'narration-prev' ? -1 : 1)];
@@ -2449,7 +2443,6 @@
   /* ================= Narration ================= */
   const MAX_NARRATION_NODES = 10;
   const narrationPending = new Set();
-  const narrationCollapsed = (documentId) => localStorage.getItem(`tlm.narration.collapsed.${documentId || ''}`) !== '0';
   /* A narration keeps generating when its panel is closed. Its status lives here so the
      panel can be reopened at any time (inspector button / status / narration text). */
   const narrationStatus = new Map();          // documentId -> '排队中' | '生成中 · 40%'
@@ -2515,11 +2508,9 @@
     const status = narrationStatus.get(S.doc?.id);
     const running = status ? `<button type="button" class="gen inspector__narration-status" data-act="narrate" role="status" title="打开串讲面板查看进度">${esc(status)} · 点击查看</button>` : '';
     if (!current) return running ? `<section class="inspector__narration" aria-label="串讲" style="border-top:1px solid var(--line-soft);padding:10px 12px"><span class="label">串讲</span>${running}</section>` : '';
-    const collapsed = narrationCollapsed(S.doc?.id);
     return `<section class="inspector__narration" aria-label="已保存串讲" style="border-top:1px solid var(--line-soft);padding:10px 12px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
         <span class="label">串讲</span>
-        <button class="icon-btn" data-act="narration-toggle" aria-expanded="${!collapsed}" aria-label="${collapsed ? '展开串讲' : '收起串讲'}" title="${collapsed ? '展开串讲' : '收起串讲'}">${icon(collapsed ? 'expand' : 'shrink')}</button>
         <span class="pager" role="group" aria-label="串讲版本" style="white-space:nowrap;flex-shrink:0">
           <button class="icon-btn" data-act="narration-prev" ${index <= 0 ? 'disabled' : ''} aria-label="上一版串讲" title="上一版串讲">${icon('chev-l')}</button>
           <span>${index + 1} / ${pages.length}</span>
@@ -2527,7 +2518,7 @@
         </span>
       </div>
       ${running}
-      <div class="md inspector__narration-text" data-act="narrate" role="button" tabindex="0" title="点击打开串讲面板（可放大阅读）" aria-label="打开串讲面板" style="max-height:${collapsed ? '92px' : 'min(36vh,280px)'};overflow:${collapsed ? 'hidden' : 'auto'};overflow-wrap:anywhere;font-size:12px;line-height:1.8;cursor:zoom-in;user-select:none;-webkit-user-select:none">${narrationContent(current)}</div>
+      <div class="md inspector__narration-text" data-act="narrate" role="button" tabindex="0" title="点击打开串讲面板（可放大阅读）" aria-label="打开串讲面板" style="max-height:min(36vh,280px);overflow:auto;overflow-wrap:anywhere;font-size:12px;line-height:1.8;cursor:zoom-in">${narrationContent(current)}</div>
     </section>`;
   }
   async function loadNarrations() {
