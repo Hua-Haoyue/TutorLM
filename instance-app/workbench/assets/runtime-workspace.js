@@ -1331,22 +1331,29 @@
 
   /* Pointer: drag node / pan surface / click-select */
   let drag = null;
-  const NO_DRAG = 'button, input, textarea, select, form, a, details, .answer, .bubble, .chat__log, .xpl__body, .minimap, [data-title-view]';
+  // Keep text selection inside cards; only the header and blank canvas pan the tree.
+  const NO_DRAG = 'button, input, textarea, select, form, a, details, .answer, .bubble, .chat__log, .xpl__body, .gnode__body, .note, .minimap, [data-title-view]';
   surface.addEventListener('pointerdown', (e) => {
-    if (layoutBusy) return;
+    if (layoutBusy || drag || e.defaultPrevented || e.isPrimary === false) return;
     if (e.button !== 0 || e.target.closest('.inspector')) return;
     touchCanvas();
     const nEl = e.target.closest('.gnode');
-    if (nEl && e.target.closest(NO_DRAG)) return;
-    if (!nEl && e.target.closest('.minimap')) return;
+    if (e.target.closest(NO_DRAG)) return;
     const n = nEl && nodeOf(nEl.dataset.id);
     const q = n ? posOf(n) : null;
-    drag = { n, el: nEl, sx: e.clientX, sy: e.clientY, ox: n ? q.x : S.view.x, oy: n ? q.y : S.view.y, moved: false };
+    // Own the gesture before the browser can start dragging selected text or an image.
+    e.preventDefault();
+    const selection = window.getSelection();
+    if (selection && (surface.contains(selection.anchorNode) || surface.contains(selection.focusNode))) selection.removeAllRanges();
+    drag = { pointerId: e.pointerId, n, el: nEl, sx: e.clientX, sy: e.clientY, ox: n ? q.x : S.view.x, oy: n ? q.y : S.view.y, moved: false };
     surface.setPointerCapture(e.pointerId);
+    surface.classList.add('canvas-dragging');
     if (!n) surface.classList.add('panning');
   });
   surface.addEventListener('pointermove', (e) => {
-    if (!drag) return;
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    if (e.buttons === 0) { endDrag(e); return; }
+    e.preventDefault();
     const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
     if (!drag.moved && Math.hypot(dx, dy) < 4) return;
     drag.moved = true;
@@ -1362,11 +1369,13 @@
     }
     drawConnector();
   });
-  const endDrag = () => {
+  const endDrag = (e) => {
     if (!drag) return;
+    if (e?.pointerId !== undefined && e.pointerId !== drag.pointerId) return;
     const d = drag; drag = null;
     touchCanvas();
-    surface.classList.remove('panning');
+    surface.classList.remove('panning', 'canvas-dragging');
+    if (surface.hasPointerCapture(d.pointerId)) surface.releasePointerCapture(d.pointerId);
     if (d.el) d.el.classList.remove('dragging');
     if (d.moved) {
       if (d.n) {
@@ -1375,11 +1384,16 @@
       } else savePrefs();
       return;
     }
+    if (e?.type !== 'pointerup') return;
     if (d.n) { if (S.selected !== d.n.id) selectNode(d.n.id); }
     else if (S.selected) selectNode(null);
   };
   surface.addEventListener('pointerup', endDrag);
   surface.addEventListener('pointercancel', endDrag);
+  surface.addEventListener('lostpointercapture', endDrag);
+  window.addEventListener('blur', endDrag);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) endDrag(); });
+  surface.addEventListener('dragstart', (e) => e.preventDefault(), true);
   surface.addEventListener('wheel', (e) => {
     if (!e.ctrlKey && e.target.closest('.gnode__scroll, .chat__log, .xpl__body, .inspector, textarea, .minimap')) return;
     e.preventDefault();

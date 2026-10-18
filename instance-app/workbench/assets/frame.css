@@ -91,6 +91,9 @@
 
 /* ---------- Canvas ---------- */
 .surface { background-color: var(--paper); background-image: radial-gradient(var(--line-soft) 1px, transparent 1px); }
+.surface { user-select: none; -webkit-user-select: none; touch-action: none; }
+.surface :is(.answer, .bubble, .chat__log, .xpl__body, .gnode__body, .note) { user-select: text; -webkit-user-select: text; }
+.surface.canvas-dragging, .surface.canvas-dragging * { user-select: none !important; -webkit-user-select: none !important; -webkit-user-drag: none !important; }
 .edges path { stroke: var(--faint); }
 .edges path.on { stroke: var(--ink); }
 .arrowhead { fill: var(--muted); }
