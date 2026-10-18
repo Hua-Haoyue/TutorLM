@@ -184,7 +184,8 @@
         return render(tokens, index, ...args).replace('<pre>', `<pre${attrs}>`);
       };
     }
-    md.renderer.rules.table_open = () => '<div class="md-table" role="region" aria-label="表格" tabindex="0"><table>\n';
+    md.renderer.rules.table_open = (tokens, index, options, env) => '<div class="md-table" role="region" aria-label="表格" tabindex="0">' +
+      (env.blocks === false ? '' : '<button type="button" class="icon-btn" data-ir-edit-table title="编辑表格" aria-label="编辑表格"><svg class="ic" aria-hidden="true"><use href="#i-code"/></svg></button>') + '<table>\n';
     md.renderer.rules.table_close = () => '</table></div>\n';
     // Documents never load remote images or execute supplied HTML.
     md.renderer.rules.image = (tokens, index) => `<span class="md-image-alt">[图片：${escape(tokens[index].content)}]</span>`;

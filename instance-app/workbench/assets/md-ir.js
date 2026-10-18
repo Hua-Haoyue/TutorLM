@@ -277,6 +277,7 @@
       // height, or the edit added text), so find the target again by its source
       // position and keep the pointer's position relative to it.
       const target = editableBlock(e.target), box = target.getBoundingClientRect();
+      if (target.matches('td, th')) { finish(); return; }
       const rel = { x: e.clientX - box.left, y: e.clientY - box.top };
       const oldStart = Number(target.dataset.start), a = active;
       const delta = a.last.length - a.original.length, start = oldStart >= a.end ? oldStart + delta : oldStart;
@@ -288,9 +289,17 @@
     }, true);
     /* A plain click (no text selected) on a block starts editing it. */
     opts.sheet.addEventListener('click', (e) => {
+      const edit = e.target.closest('[data-ir-edit-table]');
+      if (edit && opts.enabled()) {
+        e.preventDefault();
+        const cell = edit.closest('.md-table')?.querySelector('th[data-b], td[data-b]');
+        if (cell) begin(cell, 0, 0, 'start');
+        return;
+      }
       if (e.defaultPrevented || !opts.enabled() || !getSelection().isCollapsed) return;
       if (e.target.closest('mark.anchor, a, input, button, textarea, .ir-edit, [data-math-source]')) return;
       const block = editableBlock(e.target);
+      if (block?.matches('td, th')) return;
       if (block) begin(block, e.clientX, e.clientY);
     });
 
