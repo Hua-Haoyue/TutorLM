@@ -171,14 +171,21 @@ class ExplanationService:
                 query = question + ' ' + node.title + ' ' + (node.content or '')[:1000]
                 context['project_code'] = self._app.agent.code.search(query)
         if options.get('web_search'):
-            context['web_evidence'] = self._app.provider.research(question + ' ' + node.title, options)
+            # Searching is the model's decision; pages it used are attached as links.
+            context['web_search_available'] = True
         request = ExplanationRequest(node=node, question=question,
                                      language='zh' if language == 'auto' else language, learning_context=context)
-        try:
-            answer, obstacle = parse_answer(self._app.provider.explain(request), allow_diagnostic=allow_diagnostic)
-        except ProviderError:
-            context['format_retry'] = 'Previous response was invalid. Return one complete valid JSON object matching the schema; close all braces.'
-            answer, obstacle = parse_answer(self._app.provider.explain(request), allow_diagnostic=allow_diagnostic)
+        from backend.application.ports import grounding, streaming
+
+        def live_answer(raw):
+            # The model writes {"kind":…,"answer":"…"}; the user sees the answer so far.
+            return streaming.json_string_prefix(raw, 'answer') if raw.lstrip()[:1] in ('{', '`') else raw
+        with streaming.stream(live_answer), grounding.collect() as pages:
+            try:
+                answer, obstacle = parse_answer(self._app.provider.explain(request), allow_diagnostic=allow_diagnostic)
+            except ProviderError:
+                context['format_retry'] = 'Previous response was invalid. Return one complete valid JSON object matching the schema; close all braces.'
+                answer, obstacle = parse_answer(self._app.provider.explain(request), allow_diagnostic=allow_diagnostic)
         capabilities = self._app.provider.capabilities
         explanation = Explanation.create(project_id=node.project_id, node_id=node.id, question=question,
                                          answer=answer, provider=capabilities.name, model=capabilities.model)
@@ -188,8 +195,8 @@ class ExplanationService:
                                          'explanation_preferences') if key in context}}
         if context.get('project_code'):
             explanation.learning['code_citations'] = context['project_code']
-        if context.get('web_evidence'):
-            explanation.learning['web_sources'] = context['web_evidence']['sources']
+        if pages:
+            explanation.learning['web_sources'] = pages
         if context.get('parent'):
             explanation.learning['context']['parent_explanation_id'] = context['parent']['explanation_id']
         return explanation

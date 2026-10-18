@@ -1376,10 +1376,39 @@
   }
   const plainMd = (t) => collapse(String(t || '').replace(/^#+\s+.*$/gm, '').replace(/[*_`>#$]/g, ''));
   const shownQuestion = (q) => String(q || '').replace(/\n?（[^（）]*）\s*$/, '').trim() || '请解释这个知识点';
-  function runLine(run) {
+  function runLine(run, n) {
     const label = { queued: '排队中', running: '生成中' }[run.state] || run.state;
     return `<div class="gen" role="status">${label}${run.progress ? ` · ${run.progress}%` : ''}
-      <button class="btn btn--sm" data-act="node-cancel" style="margin-left:auto">${icon('stop')}取消</button></div>`;
+      <button class="btn btn--sm" data-act="node-cancel" style="margin-left:auto">${icon('stop')}取消</button></div>
+      ${run.partial && !S.pendingChat[n.id] ? `<div class="answer gen-stream" aria-live="off">${streamHtml(run.partial)}</div>` : ''}`;
+  }
+  /* Pages the model looked up on the web for this explanation (only when it searched). */
+  function webSourcesHtml(exp) {
+    const pages = (exp?.learning?.web_sources || []).filter((s) => s && typeof s.uri === 'string' && /^https?:\/\//i.test(s.uri)).slice(0, 10);
+    if (!pages.length) return '';
+    const host = (uri) => { try { return new URL(uri).hostname.replace(/^www\./, ''); } catch { return ''; } };
+    return `<div class="xpl__sources"><span class="label">参考资料</span><ol>${pages.map((s) => `<li><a href="${esc(s.uri)}" target="_blank" rel="noopener noreferrer nofollow" title="${esc(s.uri)}">${esc(s.title || host(s.uri))}</a>${s.title && host(s.uri) && s.title !== host(s.uri) ? `<small>${esc(host(s.uri))}</small>` : ''}</li>`).join('')}</ol></div>`;
+  }
+  /* The explanation as the model writes it (unfinished Markdown and formulas included). */
+  const streamHtml = (text) => renderMd(text, { blocks: false }) + '<span class="gen-caret" aria-hidden="true"></span>';
+  /* Update the live text in place on every poll, without re-rendering the card. */
+  function paintStream(nodeId, run) {
+    const n = nodeOf(nodeId), el = elOf(n);
+    if (!el || !run.partial) return;
+    if (S.pendingChat[nodeId]) {
+      const wait = $('.bubble--wait', el);
+      if (wait) { wait.innerHTML = streamHtml(run.partial); wait.classList.add('answer'); const log = $('.chat__log', el); if (log) log.scrollTop = log.scrollHeight; }
+    } else {
+      let box = $('.gen-stream', el);
+      if (!box) {
+        const line = $('.gen', el);
+        if (!line) return;
+        box = document.createElement('div'); box.className = 'answer gen-stream'; box.setAttribute('aria-live', 'off');
+        line.after(box);
+      }
+      box.innerHTML = streamHtml(run.partial);
+    }
+    drawEdges();
   }
 
   /* Explanation pages vs chat.
@@ -1594,7 +1623,7 @@
         <div class="gnode__head">${kindLine}<span class="src" title="${esc(src)}">${esc(src)}</span></div>
         <div class="gnode__body"><h4 class="md-inline">${nodeTitle(titleSource)}</h4><div class="gnode__sum md-inline">${inlineMd(sum)}</div>
         ${pages.length || chat.length ? `<div class="gnode__meta">${dots}${pages.length ? `<span>${pages.length} 版解释</span>` : ''}${chat.length ? `<span>${chat.length} 条对话</span>` : ''}</div>` : ''}
-        ${run ? runLine(run) : ''}</div></div>`;
+        ${run ? runLine(run, n) : ''}</div></div>`;
     }
     const canExplain = S.kinds.has('explanation');
     const deeper = explChildren(n).length;
@@ -1606,7 +1635,7 @@
     const kids = childrenOf(n.id).length;
     const canRetell = S.kinds.has('retelling') && page && kids;
     const pageBody = page
-      ? `<div class="xpl__body"><div class="answer" data-answer-node="${esc(n.id)}" data-exp="${esc(page.id)}">${answerHtml(n, page)}</div></div>`
+      ? `<div class="xpl__body"><div class="answer" data-answer-node="${esc(n.id)}" data-exp="${esc(page.id)}">${answerHtml(n, page)}</div>${webSourcesHtml(page)}</div>`
       : `<div class="xpl__empty"><span>${canExplain ? '还没有解释。' : '当前镜像未启用解释工作流。'}</span>${canExplain ? `<button class="btn btn--sm btn--primary" data-act="node-explain" ${run ? 'disabled' : ''}>${icon('sparkle')}生成解释</button>` : ''}</div>`;
     return `<div class="gnode sel ${m.status === 'mastered' ? 'mastered' : ''}" ${attrs} role="group" aria-label="知识节点：${esc(n.title)}">
       <div class="gnode__head">
@@ -1622,7 +1651,7 @@
             ${pager}</div>
         </div>
         <div class="xpl">
-          ${run ? runLine(run) : ''}
+          ${run ? runLine(run, n) : ''}
           ${!run && ['failed', 'cancelled', 'interrupted'].includes(S.runs[n.id]?.state) ? '<p class="obstacle-error" role="alert">本次生成未完成，已保留上一份解释。可重新生成。</p>' : ''}
           ${pageBody}
           ${page || m.source?.fromNode ? `<div class="node-learning-actions">
@@ -1634,7 +1663,7 @@
           ${feynmanHtml(n, page, run || optimizingNodes.has(n.id))}
         </div>
         ${canExplain ? `<div class="chat">
-          <div class="chat__log" role="log" aria-label="节点对话" aria-live="polite">${chat.map(exp => `<div class="bubble bubble--q">${esc(shownQuestion(exp.question))}</div><div class="bubble bubble--a answer" data-answer-node="${esc(n.id)}" data-exp="${esc(exp.id)}">${answerHtml(n, exp)}</div>`).join('')}${S.pendingChat[n.id] ? `<div class="bubble bubble--q">${esc(S.pendingChat[n.id])}</div><div class="bubble bubble--a bubble--wait" role="status">正在回答…</div>` : ''}${S.chatErrors?.[n.id] ? `<div class="bubble bubble--q">${esc(S.chatErrors[n.id].question)}</div><div class="bubble bubble--a" role="alert">回复未完成：${esc(S.chatErrors[n.id].message)}。请重新发送。</div>` : ''}</div>
+          <div class="chat__log" role="log" aria-label="节点对话" aria-live="polite">${chat.map(exp => `<div class="bubble bubble--q">${esc(shownQuestion(exp.question))}</div><div class="bubble bubble--a answer" data-answer-node="${esc(n.id)}" data-exp="${esc(exp.id)}">${answerHtml(n, exp)}${webSourcesHtml(exp)}</div>`).join('')}${S.pendingChat[n.id] ? `<div class="bubble bubble--q">${esc(S.pendingChat[n.id])}</div><div class="bubble bubble--a bubble--wait${S.runs[n.id]?.partial ? ' answer' : ''}" role="status">${S.runs[n.id]?.partial ? streamHtml(S.runs[n.id].partial) : '正在回答…'}</div>` : ''}${S.chatErrors?.[n.id] ? `<div class="bubble bubble--q">${esc(S.chatErrors[n.id].question)}</div><div class="bubble bubble--a" role="alert">回复未完成：${esc(S.chatErrors[n.id].message)}。请重新发送。</div>` : ''}</div>
           <div class="explanation-depth" role="group" aria-label="解释深度">${[['auto', '自动'], ['black_box', '知道用途'], ['mechanism', '机制拆解']].map(([value, label]) => `<button type="button" data-depth="${value}" aria-pressed="${(m.explanation_depth || 'auto') === value}" ${run ? 'disabled' : ''}>${label}</button>`).join('')}</div>
           <form class="chat__form" data-chat><input class="input" name="q" maxlength="900" placeholder="继续问这个节点…" aria-label="向节点提问" autocomplete="off" ${run ? 'disabled' : ''}>
             <button class="btn btn--primary" type="submit" aria-label="发送" ${run ? 'disabled' : ''}>${icon('send')}</button></form>
@@ -2053,8 +2082,10 @@
     paintState();
     const el = elOf(nodeOf(nodeId));
     const line = el && $('.gen', el);
-    if (line && !api.TERMINAL.has(run.state)) line.firstChild.textContent = ({ queued: '排队中', running: '生成中' }[run.state] || run.state) + (run.progress ? ` · ${run.progress}%` : '');
-    else renderNode(nodeId);
+    if (line && !api.TERMINAL.has(run.state)) {
+      line.firstChild.textContent = ({ queued: '排队中', running: '生成中' }[run.state] || run.state) + (run.progress ? ` · ${run.progress}%` : '');
+      paintStream(nodeId, run);
+    } else renderNode(nodeId);
   }
   async function addExplanation(node, exp, asPage) {
     (S.history[node.id] ||= []).unshift(exp);
@@ -2293,8 +2324,13 @@
       body = `<p class="muted insp-empty" style="margin:0;padding:10px 12px;font-size:12px">${total ? '点击节点查看详情；拖动空白处平移画布。' : '还没有节点。'}</p>`;
     }
     const hasNarration = documentNarrations().length > 0;
-    const canNarrate = S.kinds.has('narration') && total > 0 && !narrationPending.has(S.doc?.id);
-    inspector.innerHTML = head + body + narrationPanel() + `<div class="inspector__cta"><button class="btn btn--primary" data-act="${hasNarration ? 'narration-regenerate' : 'narrate'}" ${canNarrate ? '' : 'disabled'} title="${S.kinds.has('narration') ? '' : '当前镜像未启用串讲工作流'}">${icon(hasNarration ? 'redo' : 'narrate')}${hasNarration ? '重新生成' : '生成串讲'}</button></div>`;
+    const pending = narrationPending.has(S.doc?.id);
+    const canNarrate = S.kinds.has('narration') && total > 0;
+    const cta = pending
+      ? `<button class="btn btn--primary" data-act="narrate">${icon('narrate')}查看串讲进度</button>`
+      : `<button class="btn btn--primary" data-act="${hasNarration ? 'narration-regenerate' : 'narrate'}" ${canNarrate ? '' : 'disabled'} title="${S.kinds.has('narration') ? '' : '当前镜像未启用串讲工作流'}">${icon(hasNarration ? 'redo' : 'narrate')}${hasNarration ? '重新生成' : '生成串讲'}</button>`
+        + (hasNarration ? `<button class="btn" data-act="narrate" title="打开串讲面板">${icon('expand')}打开</button>` : '');
+    inspector.innerHTML = head + body + narrationPanel() + `<div class="inspector__cta">${cta}</div>`;
   }
   inspector.addEventListener('click', action(async (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
@@ -2317,6 +2353,9 @@
     const edge = e.target.closest('[data-edge-delete]');
     if (edge) { await sync(api.del(`${projectPath()}/graph/edges/${p(edge.dataset.edgeDelete)}`)); await refreshGraph(); toast('已删除连接'); }
   }));
+  inspector.addEventListener('keydown', (e) => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.inspector__narration-text')) { e.preventDefault(); openNarration().catch(fail); }
+  });
   inspector.addEventListener('change', action(async (e) => {
     const n = nodeOf(S.selected);
     if (n && e.target.matches('[data-act-change="kind"]')) {
@@ -2328,6 +2367,33 @@
   /* ================= Narration ================= */
   const MAX_NARRATION_NODES = 10;
   const narrationPending = new Set();
+  /* A narration keeps generating when its panel is closed. Its status lives here so the
+     panel can be reopened at any time (inspector button / status / narration text). */
+  const narrationStatus = new Map();          // documentId -> '排队中' | '生成中 · 40%'
+  const narrationWatchers = new Set();        // (documentId, { status } | { narration } | { error }) => void
+  const notifyNarration = (documentId, event) => narrationWatchers.forEach((fn) => { try { fn(documentId, event); } catch { /* panel gone */ } });
+  async function startNarration(projectId, documentId, input) {
+    if (narrationPending.has(documentId)) { toast('串讲正在生成中'); return null; }
+    narrationPending.add(documentId); narrationStatus.set(documentId, '排队中');
+    renderInspector(); notifyNarration(documentId, { status: '排队中' });
+    try {
+      const res = await api.run('narration', input, { onRun: (v) => {
+        const status = `${{ queued: '排队中', running: '生成中' }[v.state] || v.state}${v.progress ? ' · ' + v.progress + '%' : ''}`;
+        narrationStatus.set(documentId, status); notifyNarration(documentId, { status });
+        const live = $('.inspector__narration-status'); if (live) live.textContent = status + ' · 点击查看';
+      } });
+      rememberNarration(res.narration, projectId, documentId);
+      notifyNarration(documentId, { narration: res.narration });
+      toast('串讲已保存');
+      return res.narration;
+    } catch (error) {
+      notifyNarration(documentId, { error });
+      throw error;
+    } finally {
+      narrationPending.delete(documentId); narrationStatus.delete(documentId);
+      renderInspector();
+    }
+  }
   function rememberNarration(narration, projectId, documentId) {
     if (S.project?.id !== projectId) return;
     S.narrations = [narration, ...S.narrations.filter((nar) => nar.id !== narration.id)];
@@ -2343,19 +2409,10 @@
       .sort((a, b) => tree.indexOf(a) - tree.indexOf(b)).slice(0, MAX_NARRATION_NODES).map((n) => n.id);
     if (!ids.length) { toast('请至少保留 1 个根节点'); return; }
     const pages = documentNarrations(), current = pages[narrationIndex(pages)];
-    narrationPending.add(documentId);
-    renderInspector();
-    try {
-      const result = await api.run('narration', {
-        project_id: projectId, document_id: documentId, node_ids: ids,
-        ...(current?.title ? { title: current.title } : {}),
-      });
-      rememberNarration(result.narration, projectId, documentId);
-      toast('串讲已保存');
-    } finally {
-      narrationPending.delete(documentId);
-      renderInspector();
-    }
+    await startNarration(projectId, documentId, {
+      project_id: projectId, document_id: documentId, node_ids: ids,
+      ...(current?.title ? { title: current.title } : {}),
+    });
   }
   function documentNarrations(items = S.narrations, documentId = S.doc?.id) {
     const ids = new Set(S.nodes.filter((n) => n.document_id === documentId).map((n) => n.id));
@@ -2372,7 +2429,9 @@
   }
   function narrationPanel() {
     const pages = documentNarrations(), index = narrationIndex(pages), current = pages[index];
-    if (!current) return '';
+    const status = narrationStatus.get(S.doc?.id);
+    const running = status ? `<button type="button" class="gen inspector__narration-status" data-act="narrate" role="status" title="打开串讲面板查看进度">${esc(status)} · 点击查看</button>` : '';
+    if (!current) return running ? `<section class="inspector__narration" aria-label="串讲" style="border-top:1px solid var(--line-soft);padding:10px 12px"><span class="label">串讲</span>${running}</section>` : '';
     return `<section class="inspector__narration" aria-label="已保存串讲" style="border-top:1px solid var(--line-soft);padding:10px 12px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
         <span class="label">串讲</span>
@@ -2382,8 +2441,8 @@
           <button class="icon-btn" data-act="narration-next" ${index >= pages.length - 1 ? 'disabled' : ''} aria-label="下一版串讲" title="下一版串讲">${icon('chev-r')}</button>
         </span>
       </div>
-      ${narrationPending.has(S.doc?.id) ? '<div class="gen" role="status">生成中</div>' : ''}
-      <div class="md" aria-live="polite" style="max-height:min(36vh,280px);overflow:auto;overflow-wrap:anywhere;font-size:12px;line-height:1.8">${narrationContent(current)}</div>
+      ${running}
+      <div class="md inspector__narration-text" data-act="narrate" role="button" tabindex="0" title="点击打开串讲面板（可放大阅读）" aria-label="打开串讲面板" style="max-height:min(36vh,280px);overflow:auto;overflow-wrap:anywhere;font-size:12px;line-height:1.8;cursor:zoom-in">${narrationContent(current)}</div>
     </section>`;
   }
   async function loadNarrations() {
@@ -2403,7 +2462,7 @@
     if (!roots.length) return;
     let order = roots.sort((a, b) => tree.indexOf(a) - tree.indexOf(b))
       .map((n, i) => ({ n, on: i < MAX_NARRATION_NODES }));
-    let current = saved[0] || null, busy = false;
+    let current = saved[0] || null, busy = narrationPending.has(documentId);
     const { root } = modal({
       title: '生成串讲', wide: true,
       body: `<style>@media(max-width:640px){.narr{grid-template-columns:minmax(0,1fr)!important}.narr>div{min-width:0;padding-left:0!important}.modal__foot{flex-wrap:wrap}}</style><div class="narr">
@@ -2412,29 +2471,20 @@
           <ul class="narr__list" id="narr-list" aria-label="节点与顺序"></ul></div>
         <div style="min-width:0;padding-left:16px">
           <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><span class="label">已生成</span>
-            <select class="input" id="narr-history" style="height:26px;flex:1" aria-label="历史串讲"></select></div>
-          <div class="gen" id="narr-run" hidden></div>
+            <select class="input" id="narr-history" style="height:26px;flex:1" aria-label="历史串讲"></select>
+            <button type="button" class="icon-btn" id="narr-max" aria-pressed="false" title="放大阅读" aria-label="放大阅读">${icon('expand')}</button></div>
+          <div class="gen" id="narr-run" role="status" ${busy ? '' : 'hidden'}>${esc(narrationStatus.get(documentId) || '')}${busy ? ' · 关闭面板也会继续生成' : ''}</div>
           <div class="narr__preview" id="narr-prev" aria-live="polite" style="white-space:normal"></div></div></div>`,
       actions: [
         { label: '复制', run: async () => { if (current) { await copyText(narrationMd(current)); toast('讲稿已复制'); } } },
         { label: '下载 .md', run: () => current && download(`${current.title}.md`, narrationMd(current)) },
         { label: '保存为文档', run: async (c) => { if (!current) return; c(); await createDocument(current.title, narrationMd(current)); } },
-        { label: '生成串讲', primary: true, id: 'narr-go', run: async (c, r, b) => {
+        { label: '生成串讲', primary: true, id: 'narr-go', run: async (c, r) => {
           const ids = order.filter((o) => o.on).map((o) => o.n.id);
           if (!ids.length) { toast('请至少选择 1 个节点'); return; }
-          if (narrationPending.has(documentId)) { toast('串讲正在生成中'); return; }
-          narrationPending.add(documentId);
-          renderInspector();
-          busy = true; b.disabled = true; paint();
           const title = $('#narr-title', r).value.trim();
-          try {
-            const res = await api.run('narration', { project_id: projectId, document_id: documentId, node_ids: ids, ...(title ? { title } : {}) }, {
-              onRun: (v) => { const el = $('#narr-run', r); if (el) { el.hidden = false; el.textContent = `${{ queued: '排队中', running: '生成中' }[v.state] || v.state}${v.progress ? ' · ' + v.progress + '%' : ''}`; } },
-            });
-            current = res.narration; saved.unshift(current);
-            rememberNarration(current, projectId, documentId);
-            toast('串讲已保存');
-          } finally { busy = false; narrationPending.delete(documentId); renderInspector(); if (b.isConnected) { b.disabled = false; $('#narr-run', r).hidden = true; paint(); } }
+          // Runs in the background: closing the panel does not stop it, reopening shows it.
+          await startNarration(projectId, documentId, { project_id: projectId, document_id: documentId, node_ids: ids, ...(title ? { title } : {}) });
         } },
       ],
     });
@@ -2455,6 +2505,8 @@
         });
       } else preview.textContent = '';
       $$('.modal__foot .btn:not(.btn--primary)', root).forEach((b) => { b.disabled = !current || busy; });
+      const go = $('#narr-go', root);
+      if (go) { go.disabled = busy; go.textContent = busy ? '生成中…' : '生成串讲'; }
     }
     $('#narr-list', root).addEventListener('click', (e) => {
       const up = e.target.closest('[data-up]'), down = e.target.closest('[data-down]');
@@ -2464,6 +2516,27 @@
     });
     $('#narr-list', root).addEventListener('change', (e) => { const c = e.target.closest('[data-on]'); if (c) { order[c.dataset.on].on = c.checked; paint(); } });
     $('#narr-history', root).addEventListener('change', (e) => { current = saved[+e.target.value] || current; paint(); });
+    /* Enlarge for long narrations; the choice is remembered. */
+    const box = $('.modal', root), maxBtn = $('#narr-max', root);
+    const setMax = (on) => {
+      box.classList.toggle('modal--max', on); maxBtn.setAttribute('aria-pressed', String(on));
+      maxBtn.title = on ? '还原大小' : '放大阅读'; maxBtn.setAttribute('aria-label', maxBtn.title);
+      maxBtn.innerHTML = icon(on ? 'shrink' : 'expand');
+      localStorage.setItem('tlm.narr.max', on ? '1' : '0');
+    };
+    maxBtn.onclick = () => setMax(!box.classList.contains('modal--max'));
+    setMax(localStorage.getItem('tlm.narr.max') === '1');
+    /* Follow the background job of this document while the panel is open. */
+    const watch = (doc, event) => {
+      if (!root.isConnected) { narrationWatchers.delete(watch); return; }
+      if (doc !== documentId) return;
+      const run = $('#narr-run', root);
+      if (event.status) { busy = true; run.hidden = false; run.textContent = event.status + ' · 关闭面板也会继续生成'; }
+      if (event.narration) { current = event.narration; if (!saved.includes(current)) saved.unshift(current); }
+      if (event.narration || event.error) { busy = false; run.hidden = true; }
+      paint();
+    };
+    narrationWatchers.add(watch);
     paint();
   }
 

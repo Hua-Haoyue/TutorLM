@@ -290,3 +290,11 @@ html, body { height: 100%; overflow: hidden; }
 .empty-doc p { margin: 0; color: var(--muted); }
 .icon-btn:disabled { opacity: .3; cursor: not-allowed; }
 .icon-btn:disabled:hover { border-color: transparent; background: none; }
+/* Narration panel, enlarged for long narrations. */
+.modal.modal--max { width: min(1440px, 96vw); height: 94vh; max-height: 94vh; }
+.modal--max .modal__body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.modal--max .narr { flex: 1; min-height: 0; }
+.modal--max .narr > div:last-child { display: flex; flex-direction: column; min-height: 0; }
+.modal--max .narr__preview { flex: 1; max-height: none; font: 400 15px/1.9 var(--sans); color: var(--ink); padding-right: 8px; }
+.inspector__narration-status { width: 100%; border: 0; cursor: pointer; text-align: left; margin: 0 0 8px; }
+.inspector__narration-text:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }

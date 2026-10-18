@@ -148,3 +148,15 @@ select.input { appearance: auto; }
 .gnode__titlerow { display: flex; align-items: flex-start; gap: 8px; }
 .gnode__titlerow > .title-view, .gnode__titlerow > .title-input { flex: 1 1 auto; min-width: 0; }
 .gnode__titlerow > .pager { margin-left: auto; flex: none; white-space: nowrap; padding-top: 1px; }
+/* Live explanation while it is generated. */
+.gen-stream { margin-top: 8px; padding: 8px 10px; border-left: 2px solid var(--line); color: var(--ink-2); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+.gnode:not(.sel) .gen-stream { max-height: 7.5em; overflow: hidden; mask-image: linear-gradient(#000 70%, transparent); }
+.gen-caret { display: inline-block; width: .5em; height: 1em; margin-left: 2px; vertical-align: -2px; background: currentColor; opacity: .55; animation: gen-caret 1s steps(2) infinite; }
+@keyframes gen-caret { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .gen-caret { animation: none; } }
+/* Web pages an explanation drew on (shown only when the model searched). */
+.xpl__sources { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); font-size: 12px; }
+.xpl__sources .label { display: block; margin-bottom: 4px; }
+.xpl__sources ol { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
+.xpl__sources a { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.xpl__sources small { margin-left: 6px; color: var(--muted); }

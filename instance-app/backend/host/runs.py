@@ -139,6 +139,8 @@ class RunManager:
         self.max_runs_per_session = int(max_runs_per_session)
         self._handlers: dict[str, RunHandler] = {}
         self._lock = threading.RLock()
+        # Live partial text of running generations (see application.ports.streaming).
+        self._partials: dict[str, str] = {}
         self.session_valid: Callable[[str], bool] = lambda _: True
         self.draft_committer = None
         config = executors or {
@@ -247,6 +249,10 @@ class RunManager:
         )
         return updated or run
 
+    def partial(self, run_id: str) -> str | None:
+        """Text a running generation has produced so far (only while it runs)."""
+        return self._partials.get(run_id)
+
     def is_cancelled(self, run_id: str) -> bool:
         run = self.store.get_run(run_id)
         if run is None:
@@ -277,6 +283,8 @@ class RunManager:
             store=self.store,
         )
 
+        from backend.application.ports import streaming
+        partial = streaming.RECORDER.set(lambda text: self._partials.__setitem__(run_id, text[:60000]))
         try:
             from backend.application.services.model_options import inference_options
             with inference_options(ctx.payload):
@@ -298,6 +306,9 @@ class RunManager:
         except Exception as exc:  # pragma: no cover - defensive
             self._fail(run_id, AppError("Run failed", code="run_failed", details={"reason": type(exc).__name__}))
             return
+        finally:
+            streaming.RECORDER.reset(partial)
+            self._partials.pop(run_id, None)
 
         # Cancel-aware commit: no result is written after a cancellation.
         with self._lock:

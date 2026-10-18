@@ -55,6 +55,32 @@ def build_transport(*, timeout: float) -> Transport:
     return transport
 
 
+def build_stream_transport():
+    """Streaming HTTP: `on_line(bytes)` per response line; returns (status, error body).
+
+    The timeout applies to each read, so a long answer that keeps arriving never
+    times out; a stalled connection still does."""
+
+    def transport(request: urllib.request.Request, effective_timeout: float, on_line) -> tuple[int, bytes]:
+        try:
+            with urllib.request.urlopen(request, timeout=effective_timeout) as response:
+                for line in response:
+                    on_line(line)
+                return int(response.status), b''
+        except urllib.error.HTTPError as exc:
+            return int(exc.code), exc.read()
+        except urllib.error.URLError as exc:
+            if isinstance(exc.reason, TimeoutError):
+                raise ProviderUnavailable('模型响应超时，请稍后重试', details={'reason': 'timeout'}) from None
+            raise ProviderUnavailable('Model service is unreachable') from None
+        except TimeoutError:
+            raise ProviderUnavailable('模型响应超时，请稍后重试', details={'reason': 'timeout'}) from None
+        except (http.client.HTTPException, ConnectionError):
+            raise ProviderUnavailable('模型服务连接中断，请稍后重试', details={'reason': 'connection'}) from None
+
+    return transport
+
+
 class OpenAICompatibleProvider:
     """OpenAI 兼容的 chat completions 客户端。"""
 

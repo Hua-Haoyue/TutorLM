@@ -5,9 +5,10 @@ import json
 import urllib.parse
 import urllib.request
 
+from backend.application.ports import streaming
 from backend.application.ports.provider import GenerateRequest, GenerateResult, ProviderInfo
 from backend.domain.errors import ProviderUnavailable
-from backend.infrastructure.providers.openai_compatible import Transport, build_transport
+from backend.infrastructure.providers.openai_compatible import Transport, build_stream_transport, build_transport
 
 
 def gemini_schema(schema):
@@ -29,7 +30,7 @@ def gemini_schema(schema):
 class GeminiProvider:
     def __init__(self, *, api_base: str, api_key: str, model: str,
                  timeout_seconds: float = 60, max_tokens: int = 2048,
-                 transport: Transport | None = None):
+                 transport: Transport | None = None, stream_transport=None):
         if not api_base or not api_key or not model:
             raise ProviderUnavailable('Gemini requires API base, key and model')
         self._base = api_base.rstrip('/')
@@ -38,6 +39,7 @@ class GeminiProvider:
         self._timeout = timeout_seconds
         self._max_tokens = max_tokens
         self._transport = transport or build_transport(timeout=timeout_seconds)
+        self._stream_transport = stream_transport or build_stream_transport()
 
     @property
     def info(self):
@@ -70,13 +72,18 @@ class GeminiProvider:
             body['generationConfig']['responseMimeType'] = 'application/json'
             if request.json_schema:
                 body['generationConfig']['responseSchema'] = gemini_schema(request.json_schema)
-        http_request = urllib.request.Request(
-            base + '/models/' + model + ':generateContent',
-            data=json.dumps(body, ensure_ascii=False).encode('utf-8'), method='POST',
-            headers={'x-goog-api-key': self._key, 'Content-Type': 'application/json',
-                     'Accept': 'application/json'},
-        )
-        status, raw = self._transport(http_request, request.timeout_seconds or self._timeout)
+        feed = streaming.sink()
+        if feed is not None:
+            status, raw = self._stream(base + '/models/' + model + ':streamGenerateContent?alt=sse', body,
+                                       request.timeout_seconds or self._timeout, feed)
+        else:
+            http_request = urllib.request.Request(
+                base + '/models/' + model + ':generateContent',
+                data=json.dumps(body, ensure_ascii=False).encode('utf-8'), method='POST',
+                headers={'x-goog-api-key': self._key, 'Content-Type': 'application/json',
+                         'Accept': 'application/json'},
+            )
+            status, raw = self._transport(http_request, request.timeout_seconds or self._timeout)
         if status != 200:
             reason = {401: 'authentication failed', 403: 'access denied',
                       404: 'model or API endpoint not found', 429: 'rate limit exceeded',
@@ -112,6 +119,50 @@ class GeminiProvider:
                                                    if isinstance(item, dict) and isinstance(item.get('web'), dict)]},
                               prompt_tokens=usage.get('promptTokenCount'),
                               completion_tokens=usage.get('candidatesTokenCount'))
+
+    def _stream(self, url, body, timeout, feed):
+        """streamGenerateContent (SSE): feed the text so far after every chunk, then return
+        the chunks merged into one generateContent-shaped response for the usual checks."""
+        texts, last = [], {}
+
+        def on_line(line):
+            line = line.decode('utf-8', 'replace').strip()
+            if not line.startswith('data:'):
+                return
+            try:
+                chunk = json.loads(line[5:])
+            except ValueError:
+                return
+            if not isinstance(chunk, dict):
+                return
+            last['seen'] = True
+            candidates = chunk.get('candidates')
+            candidate = candidates[0] if isinstance(candidates, list) and candidates and isinstance(candidates[0], dict) else {}
+            parts = (candidate.get('content') or {}).get('parts') if isinstance(candidate.get('content'), dict) else None
+            for part in parts if isinstance(parts, list) else []:
+                if isinstance(part, dict) and not part.get('thought') and isinstance(part.get('text'), str):
+                    texts.append(part['text'])
+            for key in ('finishReason', 'groundingMetadata'):
+                if candidate.get(key):
+                    last[key] = candidate[key]
+            if isinstance(chunk.get('usageMetadata'), dict):
+                last['usageMetadata'] = chunk['usageMetadata']
+            if texts:
+                feed(''.join(texts))
+
+        http_request = urllib.request.Request(
+            url, data=json.dumps(body, ensure_ascii=False).encode('utf-8'), method='POST',
+            headers={'x-goog-api-key': self._key, 'Content-Type': 'application/json', 'Accept': 'text/event-stream'},
+        )
+        status, error = self._stream_transport(http_request, timeout, on_line)
+        if status != 200:
+            return status, error
+        if not last.get('seen'):
+            return 200, b'{}'
+        candidate = {'content': {'parts': [{'text': ''.join(texts)}]}, 'finishReason': last.get('finishReason')}
+        if last.get('groundingMetadata'):
+            candidate['groundingMetadata'] = last['groundingMetadata']
+        return 200, json.dumps({'candidates': [candidate], 'usageMetadata': last.get('usageMetadata') or {}}).encode('utf-8')
 
     def close(self):
         pass

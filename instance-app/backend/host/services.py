@@ -396,6 +396,10 @@ class AppServices:
             payload["result"] = result
         if row.get("error_code"):
             payload["error"] = {"code": row["error_code"], "message": row.get("error_message") or ""}
+        if state == "running":
+            partial = self.runs.partial(row["id"])
+            if partial:
+                payload["partial"] = partial
         return payload
     # -- runtime discovery ------------------------------------------------
     def runtime_public(self) -> dict[str, Any]:

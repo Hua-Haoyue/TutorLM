@@ -274,7 +274,8 @@
     let delay = 250;
     while (!TERMINAL.has(value.state)) {
       await wait(delay, signal);
-      delay = Math.min(1000, delay * 1.4);
+      // While text is streaming in, poll faster so it reads smoothly.
+      delay = value.partial ? 350 : Math.min(1000, delay * 1.4);
       value = await get(`/api/runs/${part(value.id)}`, { signal });
       onRun(value);
     }
