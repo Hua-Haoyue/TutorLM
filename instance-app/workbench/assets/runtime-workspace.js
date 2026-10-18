@@ -221,10 +221,6 @@
     toast(describe(e), { ms: 6000 });
   }
   const action = (fn) => (...args) => Promise.resolve().then(() => fn(...args)).catch(fail);
-  const submitAction = (fn) => (event) => {
-    event.preventDefault();
-    return action(fn)(event);
-  };
 
   /* ================= Modals ================= */
   const modalHost = $('#modal-host');
@@ -857,7 +853,7 @@
   }
   function hideAsk() { askEl.hidden = true; S.ask = null; }
 
-  $('#ask-form').addEventListener('submit', submitAction(async (e) => {
+  $('#ask-form').addEventListener('submit', action(async (e) => {
     e.preventDefault();
     if (!S.ask) return;
     const origin = { ...S.ask, branchType: $('#ask-object').value }, q = $('#ask-input').value.trim();
@@ -1388,21 +1384,7 @@
     return docOf(n.document_id)?.title || '';
   }
   const plainMd = (t) => collapse(String(t || '').replace(/^#+\s+.*$/gm, '').replace(/[*_`>#$]/g, ''));
-  const shownQuestion = (q) => String(q || '').trim() || '请解释这个知识点';
-  function boundPageQuestion(n, page = currentPage(n)) {
-    if (!page) return '';
-    const saved = meta(n).explanation_questions?.[page.id];
-    return saved ? saved.question : (userAsked(page.question) ? page.question : '');
-  }
-  function pageQuestionHtml(n, page) {
-    const pending = S.pendingPageQuestions?.[n.id];
-    const error = S.pageQuestionErrors?.[n.id];
-    const question = pending || error?.question || boundPageQuestion(n, page);
-    if (!question) return '';
-    return `<div class="xpl__question"><span class="label">我的问题</span><div style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(question)}</div>
-      ${pending ? '<small role="status">正在回答…</small>' : ''}
-      ${error ? `<div role="alert">回复未完成：${esc(error.message)}</div><button class="btn btn--sm" data-act="question-retry">${icon('redo')}重试</button>` : ''}</div>`;
-  }
+  const shownQuestion = (q) => String(q || '').replace(/\n?（[^（）]*）\s*$/, '').trim() || '请解释这个知识点';
   function runLine(run, n) {
     const label = { queued: '排队中', running: '生成中' }[run.state] || run.state;
     return `<div class="gen" role="status">${label}${run.progress ? ` · ${run.progress}%` : ''}
@@ -1424,7 +1406,7 @@
     if (!el || !run.partial) return;
     if (S.pendingChat[nodeId]) {
       const wait = $('.bubble--wait', el);
-      if (wait) { wait.innerHTML = streamHtml(run.partial); wait.classList.add('answer'); }
+      if (wait) { wait.innerHTML = streamHtml(run.partial); wait.classList.add('answer'); const log = $('.chat__log', el); if (log) log.scrollTop = log.scrollHeight; }
     } else {
       let box = $('.gen-stream', el);
       if (!box) {
@@ -1678,7 +1660,6 @@
             ${pager}</div>
         </div>
         <div class="xpl">
-          ${pageQuestionHtml(n, page)}
           ${run ? runLine(run, n) : ''}
           ${!run && ['failed', 'cancelled', 'interrupted'].includes(S.runs[n.id]?.state) ? '<p class="obstacle-error" role="alert">本次生成未完成，已保留上一份解释。可重新生成。</p>' : ''}
           ${pageBody}
@@ -1691,17 +1672,14 @@
           ${feynmanHtml(n, page, run || optimizingNodes.has(n.id))}
         </div>
         ${canExplain ? `<div class="chat">
-          <div class="chat__log" role="log" aria-label="节点对话" aria-live="polite">${chat.map(exp => `<div class="bubble bubble--q">${esc(shownQuestion(meta(n).explanation_questions?.[exp.id]?.question ?? exp.question))}</div><div class="bubble bubble--a answer" data-answer-node="${esc(n.id)}" data-exp="${esc(exp.id)}">${answerHtml(n, exp)}${webSourcesHtml(exp)}</div>`).join('')}${S.pendingChat[n.id] ? `<div class="bubble bubble--q">${esc(S.pendingChat[n.id])}</div><div class="bubble bubble--a bubble--wait${S.runs[n.id]?.partial ? ' answer' : ''}" role="status">${S.runs[n.id]?.partial ? streamHtml(S.runs[n.id].partial) : '正在回答…'}</div>` : ''}${S.chatErrors?.[n.id] ? `<div class="bubble bubble--q">${esc(S.chatErrors[n.id].question)}</div><div class="bubble bubble--a" role="alert">回复未完成：${esc(S.chatErrors[n.id].message)}。<button class="btn btn--sm" data-act="chat-retry">${icon('redo')}重试</button></div>` : ''}</div>
+          <div class="chat__log" role="log" aria-label="节点对话" aria-live="polite">${chat.map(exp => `<div class="bubble bubble--q">${esc(shownQuestion(exp.question))}</div><div class="bubble bubble--a answer" data-answer-node="${esc(n.id)}" data-exp="${esc(exp.id)}">${answerHtml(n, exp)}${webSourcesHtml(exp)}</div>`).join('')}${S.pendingChat[n.id] ? `<div class="bubble bubble--q">${esc(S.pendingChat[n.id])}</div><div class="bubble bubble--a bubble--wait${S.runs[n.id]?.partial ? ' answer' : ''}" role="status">${S.runs[n.id]?.partial ? streamHtml(S.runs[n.id].partial) : '正在回答…'}</div>` : ''}${S.chatErrors?.[n.id] ? `<div class="bubble bubble--q">${esc(S.chatErrors[n.id].question)}</div><div class="bubble bubble--a" role="alert">回复未完成：${esc(S.chatErrors[n.id].message)}。请重新发送。</div>` : ''}</div>
           <div class="explanation-depth" role="group" aria-label="解释深度">${[['auto', '自动'], ['black_box', '知道用途'], ['mechanism', '机制拆解']].map(([value, label]) => `<button type="button" data-depth="${value}" aria-pressed="${(m.explanation_depth || 'auto') === value}" ${run ? 'disabled' : ''}>${label}</button>`).join('')}</div>
           <form class="chat__form" data-chat><input class="input" name="q" maxlength="900" placeholder="继续问这个节点…" aria-label="向节点提问" autocomplete="off" ${run ? 'disabled' : ''}>
             <button class="btn btn--primary" type="submit" aria-label="发送" ${run ? 'disabled' : ''}>${icon('send')}</button></form>
         </div>` : ''}
       </div></div>`;
   }
-  const scrollChats = (root = nodesEl) => $$('.chat__log', root).forEach((log) => {
-    const question = $$('.bubble--q', log).at(-1);
-    if (question) log.scrollTop += question.getBoundingClientRect().top - log.getBoundingClientRect().top - 2;
-  });
+  const scrollChats = (root = nodesEl) => $$('.chat__log', root).forEach((l) => { l.scrollTop = l.scrollHeight; });
   function renderCanvas() {
     const pool = docNodes();
     nodesEl.innerHTML = pool.map(nodeHtml).join('');
@@ -1716,9 +1694,6 @@
   function renderNode(id) {
     const n = nodeOf(id), el = elOf(n);
     if (!n || !el) return;
-    const oldLog = $('.chat__log', el), oldScroll = $('.gnode__scroll', el);
-    const chatTop = oldLog?.scrollTop || 0, cardTop = oldScroll?.scrollTop || 0;
-    const questionCount = oldLog ? $$('.bubble--q', oldLog).length : 0;
     if (el.contains(document.activeElement) && isEditable(document.activeElement) && n.id === S.selected) {
       // Keep the user's caret: refresh only the generated parts.
       const tmp = document.createElement('div'); tmp.innerHTML = nodeHtml(n);
@@ -1726,12 +1701,7 @@
       const form = $('.chat__form', el), nf = $('.chat__form', tmp);
       if (form && nf) $$('input, button', form).forEach((x, i) => { x.disabled = $$('input, button', nf)[i]?.disabled; });
     } else el.outerHTML = nodeHtml(n);
-    const updated = elOf(n), log = updated && $('.chat__log', updated), card = updated && $('.gnode__scroll', updated);
-    if (log) {
-      if ($$('.bubble--q', log).length > questionCount) scrollChats(updated);
-      else log.scrollTop = chatTop;
-    }
-    if (card) card.scrollTop = cardTop;
+    scrollChats(elOf(n) || nodesEl);
     drawEdges(); drawConnector(); renderInspector(); drawMinimap();
   }
 
@@ -1972,9 +1942,7 @@
     if (act === 'node-cancel' && running(n.id)) { await api.cancel(S.runs[n.id].id); toast('已请求取消'); }
     if (act === 'node-link') linkNode(n);
     if (act === 'node-reveal') revealSource(n);
-    if (act === 'node-explain') await explain(n, boundPageQuestion(n), { page: true });
-    if (act === 'question-retry' && S.pageQuestionErrors?.[n.id]) await explain(n, S.pageQuestionErrors[n.id].question, { page: true });
-    if (act === 'chat-retry' && S.chatErrors?.[n.id]) await explain(n, S.chatErrors[n.id].question, { page: false });
+    if (act === 'node-explain') await explain(n, '', { page: true });
     if (act === 'node-optimize') await optimize(n);
     if (act === 'node-retell') await retell(n);
     if (act === 'retelling-toggle' && !running(n.id)) {
@@ -1995,7 +1963,7 @@
       await patchMeta(n, {});
     }
   }));
-  nodesEl.addEventListener('submit', submitAction(async (e) => {
+  nodesEl.addEventListener('submit', action(async (e) => {
     const form = e.target.closest('[data-chat]');
     if (!form) return;
     e.preventDefault();
@@ -2129,11 +2097,8 @@
       paintStream(nodeId, run);
     } else renderNode(nodeId);
   }
-  async function addExplanation(node, exp, asPage, questionInfo) {
+  async function addExplanation(node, exp, asPage) {
     (S.history[node.id] ||= []).unshift(exp);
-    if (questionInfo) node.metadata = { ...meta(node), explanation_questions: {
-      ...meta(node).explanation_questions, [exp.id]: questionInfo,
-    } };
     if (asPage) {
       const ids = [...pagesOf(node).map((h) => h.id).filter((id) => id !== exp.id), exp.id];
       node.metadata = { ...meta(node), pages: ids, page: ids.length - 1 };
@@ -2141,8 +2106,6 @@
     } else if (!Array.isArray(meta(node).pages)) {
       // Pin the legacy page assignment so a chat turn never becomes page 1.
       node.metadata = { ...meta(node), pages: pagesOf(node).map((h) => h.id).filter((id) => id !== exp.id) };
-      await patchMeta(node, {});
-    } else if (questionInfo) {
       await patchMeta(node, {});
     }
   }
@@ -2152,13 +2115,6 @@
     if (running(node.id)) throw new Error('这个节点正在生成，请稍候');
     const input = explanationInput(node.id, question, responseMode);
     if (purpose === 'optimize') input.purpose = purpose;
-    const userQuestion = purpose === 'explain' ? String(question || '').trim() : '';
-    S.pendingPageQuestions ||= {}; S.pageQuestionErrors ||= {};
-    if (page) {
-      delete S.pageQuestionErrors[node.id];
-      if (userQuestion) S.pendingPageQuestions[node.id] = userQuestion;
-      renderNode(node.id);
-    }
     if (!page) {
       S.chatErrors ||= {}; delete S.chatErrors[node.id];
       S.pendingChat[node.id] = question; renderNode(node.id);
@@ -2170,15 +2126,13 @@
         trackRun(node.id, r);
       } });
       delete S.pendingChat[node.id];
-      await addExplanation(node, result.explanation, page, { question: userQuestion });
+      await addExplanation(node, result.explanation, page);
       if (purpose !== 'optimize') toast('已更新解释');
     } catch (e) {
       if (!page) S.chatErrors[node.id] = { question, message: e.message || '暂时无法生成' };
-      else if (userQuestion) S.pageQuestionErrors[node.id] = { question: userQuestion, message: e.message || '暂时无法生成' };
       throw e;
     } finally {
       delete S.pendingChat[node.id];
-      delete S.pendingPageQuestions[node.id];
       if (runId) markPageRun(runId, false);
       paintState();
       if (nodeOf(node.id)) renderNode(node.id);
