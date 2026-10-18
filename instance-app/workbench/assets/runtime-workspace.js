@@ -434,6 +434,7 @@
   function applyMarks() {
     if (!S.doc || S.mode === 'raw') return;
     if (isPdfView()) { applyPdfMarks(); return; }
+    const projectionCache = new Map();
     highlights.filter((h) => h.doc === S.doc.id).forEach((h) => {
       const decorate = (m) => { m.className = 'hl'; m.dataset.hl = h.id; m.title = '本地高亮（仅保存在此浏览器）'; };
       if (Number.isInteger(h.start) && markMath(h.start, h.end, decorate)) return;
@@ -452,6 +453,27 @@
         if (markMath(live.start, live.end, deco)) return;
         const block = $$('[data-b]', sheet).find(el => Number(el.dataset.start) <= at && Number(el.dataset.end) > at);
         if (!block) return;
+        if (isMarkdown(S.doc)) {
+          const blockStart = Number(block.dataset.start);
+          if (!projectionCache.has(block)) projectionCache.set(block,
+            markdown.project(S.text.slice(blockStart, Number(block.dataset.end))));
+          const projected = projectionCache.get(block);
+          const first = projected?.starts.indexOf(live.start - blockStart) ?? -1;
+          const last = projected?.ends.lastIndexOf(live.end - blockStart) ?? -1;
+          if (first >= 0 && last >= first) {
+            const display = projected.text.slice(first, last + 1);
+            const pattern = new RegExp(collapse(display).split(' ').map(escRe).join('\\s+'), 'g');
+            const sourceHits = [...projected.text.matchAll(pattern)];
+            const renderedHits = [...block.textContent.matchAll(pattern)];
+            const ordinal = sourceHits.findIndex(hit => hit.index === first && hit.index + hit[0].length === last + 1);
+            if (sourceHits.length === renderedHits.length && ordinal >= 0) {
+              const hit = renderedHits[ordinal];
+              const range = textRange(block, hit[0], hit.index);
+              if (range?.idx === hit.index) wrapRange(range, deco);
+            }
+            return;
+          }
+        }
         const anchored = S.text.slice(live.start, live.end);
         const raw = S.text.slice(Number(block.dataset.start), at), quote = collapse(anchored);
         const ordinal = [...raw.matchAll(new RegExp(escRe(anchored), 'g'))].length;
@@ -1783,11 +1805,14 @@
     }
     const raw = S.text.slice(origin.sourceStart, origin.sourceEnd);
     const pattern = collapse(origin.quote).split(' ').map(escRe).join('\\s+');
-    const hits = [...raw.matchAll(new RegExp(pattern, 'g'))];
+    const projected = isMarkdown(S.doc) ? markdown.project(raw) : null;
+    const hits = [...(projected?.text || raw).matchAll(new RegExp(pattern, 'g'))];
     const renderedHits = [...origin.blockText.matchAll(new RegExp(pattern, 'g'))];
     const ordinal = [...origin.before.matchAll(new RegExp(pattern, 'g'))].length;
     if (hits.length !== renderedHits.length || !hits[ordinal]) throw new Error('无法把这段排版文字准确对应到原文，请缩小选区或使用图像。');
-    const start = origin.sourceStart + hits[ordinal].index, end = start + hits[ordinal][0].length;
+    const hit = hits[ordinal];
+    const start = origin.sourceStart + (projected ? projected.starts[hit.index] : hit.index);
+    const end = origin.sourceStart + (projected ? projected.ends[hit.index + hit[0].length - 1] : hit.index + hit[0].length);
     return { document_id: origin.documentId, revision_id: origin.revisionId,
       selector: { type: origin.sourceFile ? 'tex-source' : 'text', ...(origin.sourceFile ? { file: origin.sourceFile } : {}), start, end, unit: 'utf16' }, quote: S.text.slice(start, end),
       prefix: S.text.slice(Math.max(0, start - 32), start), suffix: S.text.slice(end, end + 32) };
