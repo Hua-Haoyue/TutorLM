@@ -63,9 +63,29 @@ const output = path.resolve(__dirname, '../.work/markdown-smoke');
     assert.equal(fixture.toString().slice(source.selector.start, source.selector.end), '表格引用目标');
     const resolved = await page.evaluate(ref => RuntimeAPI.post('/api/sources/resolve', { refs: [ref] }), source);
     assert(resolved.items[0].resolved);
+    const longQuote = '自由意志（free will）在这里指一种特殊的控制能力：读者需要结合上下文和PAP理解这句话的责任含义。';
+    await page.evaluate(() => {
+      const block = [...document.querySelectorAll('#sheet p[data-b]')]
+        .find(el => el.textContent.startsWith('自由意志（free will）'));
+      const range = document.createRange(); range.selectNodeContents(block);
+      getSelection().removeAllRanges(); getSelection().addRange(range);
+      document.querySelector('#reader-scroll').dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    });
+    await page.waitForSelector('#ask:not([hidden])');
+    assert.equal(await page.locator('#ask-quote').textContent(), `“${longQuote}”`);
+    await page.click('#ask [data-act="ask-extract"]');
+    await page.waitForFunction(() => window.TLM_WS.state.nodes.some(node => node.content?.startsWith('自由意志（free will）')));
+    const longSource = await page.evaluate(() => window.TLM_WS.state.nodes
+      .find(node => node.content?.startsWith('自由意志（free will）')).metadata.source);
+    assert.equal(fixture.toString().slice(longSource.selector.start, longSource.selector.end), longSource.quote);
+    assert.equal(longSource.quote,
+      '自由意志**（free will）在这里指一种特殊的控制能力：读者需要结合[上下文](https://example.com/context)和`PAP`理解这句话的责任含义。');
+    assert((await page.evaluate(ref => RuntimeAPI.post('/api/sources/resolve', { refs: [ref] }), longSource)).items[0].resolved);
     await page.reload();
     await page.waitForSelector('#sheet td mark.anchor');
     assert.equal(await page.locator('#sheet td mark.anchor').textContent(), '表格引用目标');
+    await page.waitForSelector('#sheet p mark.anchor');
+    assert.equal(await page.locator('#sheet p mark.anchor').filter({ hasText: '自由意志（free will）' }).textContent(), longQuote);
     await page.keyboard.press('Control+f');
     await page.fill('#find-input', '表格引用目标');
     await page.waitForSelector('#sheet td mark.find');

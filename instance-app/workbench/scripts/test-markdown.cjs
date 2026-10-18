@@ -73,3 +73,39 @@ test('tight list entries retain selectable source ranges', () => {
   assert.match(html, /<li data-b="0" data-start="0" data-end="13">/);
   assert.match(html, /<li data-b="1"[^>]*class="task-list-item"/);
 });
+
+test('rendered selections spanning Markdown emphasis and parentheses map to exact raw source spans', () => {
+  const source = '**自由意志**（free will），在本文中指一种特殊的控制能力。';
+  const projected = renderer.project(source);
+  const selected = '自由意志（free will），在本文中指一种特殊的控制能力。';
+  assert.equal(projected.text, selected);
+  assert.equal(source.slice(projected.starts[0], projected.ends[selected.length - 1]),
+    '自由意志**（free will），在本文中指一种特殊的控制能力。');
+});
+
+test('long selections across formatting, links and code keep the correct UTF-16 offsets', () => {
+  const source = '这句包含**重点**、[来源](https://example.test/重点)和`代码`，最后还有😀。';
+  const projected = renderer.project(source);
+  assert.equal(projected.text, '这句包含重点、来源和代码，最后还有😀。');
+  assert.equal(source.slice(projected.starts[0], projected.ends[projected.text.length - 1]), source);
+  const later = renderer.project('[入口](https://example.test/重复) 重复');
+  const at = later.text.lastIndexOf('重复');
+  assert.equal(later.text, '入口 重复');
+  assert.equal(later.starts[at], '[入口](https://example.test/重复) 重复'.lastIndexOf('重复'));
+});
+
+test('escaped punctuation and HTML entities map to their complete raw spelling', () => {
+  const source = '\\*术语\\* &amp; 后续';
+  const projected = renderer.project(source);
+  assert.equal(projected.text, '*术语* & 后续');
+  assert.equal(source.slice(projected.starts[0], projected.ends[projected.text.length - 1]), source);
+});
+
+test('line endings and link titles do not shift later visible words', () => {
+  const source = '第一行**重点**\r\n第二行[链接](https://example.test/a "含有 ) 的标题")之后。';
+  const projected = renderer.project(source);
+  assert.equal(projected.text, '第一行重点\n第二行链接之后。');
+  const at = projected.text.indexOf('之后');
+  assert.equal(projected.starts[at], source.indexOf('之后'));
+  assert.equal(source.slice(projected.starts[at], projected.ends[at + 1]), '之后');
+});
