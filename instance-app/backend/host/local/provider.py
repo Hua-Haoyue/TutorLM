@@ -13,6 +13,9 @@ DEFAULT_MODEL = 'offline-demo'
 
 
 class FakeProvider:
+    def auto_relations(self, payload):
+        return json.dumps({'relations': []})
+
     name = 'fake'
 
     def __init__(self, model=DEFAULT_MODEL):
@@ -198,6 +201,11 @@ class OpenAIProvider:
     def organize_relations(self, payload):
         from backend.application.services.graph_relations import OUTPUT_SCHEMA, SYSTEM
         return self._generate('graph_relations', json.dumps(payload, ensure_ascii=False), SYSTEM,
+                              json_object=True, json_schema=OUTPUT_SCHEMA, max_tokens=max(4096, self.max_tokens))
+
+    def auto_relations(self, payload):
+        from backend.application.services.auto_relations import OUTPUT_SCHEMA, SYSTEM
+        return self._generate('auto_relations', json.dumps(payload, ensure_ascii=False), SYSTEM,
                               json_object=True, json_schema=OUTPUT_SCHEMA, max_tokens=max(4096, self.max_tokens))
 
     def narrate(self, request):
