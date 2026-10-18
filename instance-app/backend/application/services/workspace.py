@@ -131,7 +131,9 @@ class ExplanationService:
             raise InvalidInputError('Plugin has no models.generate capability')
         if persist:
             raise InvalidInputError('Workflow results must be committed by the Host')
-        from backend.application.services.learning_obstacles import build_context, parse_answer
+        from backend.application.services.learning_obstacles import (
+            apply_domain_policy, build_context, parse_answer, validate_domain_answer,
+        )
         nodes = NodeService(self._app, self._observe)
         node = nodes.get(node_id)
         if node is None:
@@ -154,6 +156,7 @@ class ExplanationService:
         context = build_context(self._app, node, nodes, self.list_for_node,
                                 LearningService(self._app).get_profile(),
                                 'auto' if allow_diagnostic else 'expand', resolved, preferences)
+        apply_domain_policy(context, question=question)
         allow_diagnostic = allow_diagnostic and context['explanation_policy']['allow_diagnostic']
         if not allow_diagnostic:
             context['response_mode'] = 'expand'
@@ -183,9 +186,14 @@ class ExplanationService:
         with streaming.stream(live_answer), grounding.collect() as pages:
             try:
                 answer, obstacle = parse_answer(self._app.provider.explain(request), allow_diagnostic=allow_diagnostic)
-            except ProviderError:
-                context['format_retry'] = 'Previous response was invalid. Return one complete valid JSON object matching the schema; close all braces.'
+                validate_domain_answer(answer, context)
+            except ProviderError as exc:
+                context['format_retry'] = (
+                    'Previous response failed the output or scene policy check. '
+                    f'Correct this issue: {exc}. Return one complete valid JSON object '
+                    'matching the schema; close all braces.')
                 answer, obstacle = parse_answer(self._app.provider.explain(request), allow_diagnostic=allow_diagnostic)
+                validate_domain_answer(answer, context)
         capabilities = self._app.provider.capabilities
         explanation = Explanation.create(project_id=node.project_id, node_id=node.id, question=question,
                                          answer=answer, provider=capabilities.name, model=capabilities.model)

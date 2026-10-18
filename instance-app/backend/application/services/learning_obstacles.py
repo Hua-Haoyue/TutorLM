@@ -1,5 +1,6 @@
 """Bounded, source-grounded context and validated obstacle explanations."""
 import json
+import re
 
 from backend.domain.errors import InvalidInputError, ProviderError
 
@@ -7,6 +8,71 @@ from backend.domain.errors import InvalidInputError, ProviderError
 STRATEGY = 'obstacles.v1'
 DEPTH_POLICY_VERSION = 'style-depth.v2'
 EXPLANATION_STYLES = ('auto', 'plain', 'rigorous', 'example', 'analogy', 'socratic')
+
+
+ACADEMIC_DOMAIN = 'academic'
+PRACTICAL_DOMAIN = 'practical'
+PRACTICAL_BANNED_TERMS = (
+    '含氮化合物', '共价键断裂', '热力学平衡', '聚合及降解', '聚合反应',
+    '降解反应', '分子轨道', '电子跃迁', '反应动力学',
+)
+PRACTICAL_STATIC_DEFINITION = re.compile(r'(?:是指|是一种).{0,24}(?:复杂)?(?:反应|机制|过程|现象)')
+RIGOROUS_REQUEST = re.compile(r'(?:严谨|严格|科研|学术|推导|证明|论文|研究方法|专业机制)', re.I)
+
+
+def classify_root_domain(*, title='', selection='', opening='', question='', style='auto'):
+    """Classify one document's root topic before choosing explanation language."""
+    if style == 'rigorous' or RIGOROUS_REQUEST.search(question or ''):
+        return {'domain': ACADEMIC_DOMAIN, 'confidence': 'high', 'override': 'rigorous_request'}
+    academic = ('定理', '证明', '引理', '矩阵', '方程', '算法', '模型', '回归', '梯度',
+                '概率', '统计', '函数', '极限', '导数', '积分', '论文', '实验设计',
+                '假设检验', '数据结构', '复杂度')
+    practical = ('做菜', '烹饪', '食谱', '锅', '火候', '健身', '训练', '拍照', '摄影',
+                 '相机', '镜头', '手机', '电脑', '设置', '安装', '维修', '清洁', '收纳',
+                 '护肤', '常识', '教程', '步骤', '怎么做', '操作')
+    text = ' '.join(str(value or '') for value in (title, selection, opening, question)).lower()
+    academic_hits = sum(text.count(term.lower()) for term in academic)
+    practical_hits = sum(text.count(term.lower()) for term in practical)
+    if practical_hits >= 2 and practical_hits > academic_hits:
+        return {'domain': PRACTICAL_DOMAIN, 'confidence': 'high', 'override': None}
+    if academic_hits >= 2 and academic_hits > practical_hits:
+        return {'domain': ACADEMIC_DOMAIN, 'confidence': 'high', 'override': None}
+    # Uncertain topics use the safer practical wording by default.
+    return {'domain': PRACTICAL_DOMAIN, 'confidence': 'low', 'override': None}
+
+
+def apply_domain_policy(context, *, question=''):
+    prefs = context.get('explanation_preferences') or {}
+    domain = classify_root_domain(
+        title=(context.get('reading_goal') or {}).get('title'),
+        selection=(context.get('reading_goal') or {}).get('selection') or context.get('selection'),
+        opening=context.get('document_opening_excerpt'), question=question,
+        style=prefs.get('style', 'auto'))
+    context['domain_context'] = domain
+    if domain['domain'] == PRACTICAL_DOMAIN:
+        confidence_note = ('场景分类置信度低；' if domain['confidence'] == 'low' else '')
+        context['explanation_policy']['rules'] += (
+            f' {confidence_note}当前根话题按日常/实操场景处理。'
+            '禁止百科词条式的微观化学、物理或实验室定义，尤其不要使用含氮化合物、'
+            '聚合及降解、共价键断裂、热力学平衡等黑话。'
+            '直接按触发条件 -> 肉眼或现场可感知的变化 -> 实际效果来写；'
+            '不要使用“XX是指一种复杂反应/机制”的静态下定义句式。'
+            '只讲真实发生的操作过程，不额外引入生活类比之外的新专业词。')
+    else:
+        context['explanation_policy']['rules'] += (
+            '根话题按硬核学术科研场景处理；保留必要术语、假设、条件和推导。')
+    return context
+
+
+def validate_domain_answer(answer, context):
+    domain = (context.get('domain_context') or {}).get('domain')
+    if domain != PRACTICAL_DOMAIN:
+        return
+    for term in PRACTICAL_BANNED_TERMS:
+        if term in answer:
+            raise ProviderError(f'Practical explanation used forbidden laboratory term: {term}')
+    if PRACTICAL_STATIC_DEFINITION.search(answer):
+        raise ProviderError('Practical explanation used a static textbook definition')
 
 
 def explanation_preferences(value=None):
