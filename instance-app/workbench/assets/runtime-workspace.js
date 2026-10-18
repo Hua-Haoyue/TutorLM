@@ -1313,8 +1313,7 @@
 
   /* Pointer: drag node / pan surface / click-select */
   let drag = null;
-  // Keep text selection inside cards; only the header and blank canvas pan the tree.
-  const NO_DRAG = 'button, input, textarea, select, form, a, details, .answer, .bubble, .chat__log, .xpl__body, .gnode__body, .note, .minimap, [data-title-view]';
+  const NO_DRAG = 'button, input, textarea, select, form, a, details, .answer, .bubble, .chat__log, .xpl__body, .minimap, [data-title-view]';
   surface.addEventListener('pointerdown', (e) => {
     if (layoutBusy) return;
     if (e.button !== 0 || e.target.closest('.inspector')) return;
