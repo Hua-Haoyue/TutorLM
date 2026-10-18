@@ -167,3 +167,13 @@ def test_real_transport_gets_selected_policy_without_network():
     assert calls[0].system == SYSTEM
     assert json.loads(calls[0].prompt)['learning_context']['explanation_policy']['style'] == 'rigorous'
     assert calls[0].json_object and calls[0].json_schema
+
+
+
+def test_every_style_puts_the_definition_first_without_changing_depth_tiers():
+    assert 'DEFINITION FIRST (every style, follow-up and regeneration)' in SYSTEM
+    assert SYSTEM.index('DEFINITION FIRST') < SYSTEM.index('Follow explanation_policy.rules strictly')
+    assert 'depth tiers of plain and analogy keep their own' in ' '.join(SYSTEM.split())
+    # The depth-limited tiers are unchanged.
+    assert explanation_policy(0, 'plain')['rules'].startswith('At most TWO sentences. State the role in the original passage')
+    assert 'Start directly with the familiar scene' in explanation_policy(3, 'plain')['rules']
