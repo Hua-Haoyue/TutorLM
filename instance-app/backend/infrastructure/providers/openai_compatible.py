@@ -14,6 +14,7 @@ transport**（见 ``build_transport``）替代真实网络，绝不联网。
 
 from __future__ import annotations
 
+import http.client
 import json
 import urllib.error
 import urllib.request
@@ -41,8 +42,15 @@ def build_transport(*, timeout: float) -> Transport:
                 return int(response.status), response.read()
         except urllib.error.HTTPError as exc:
             return int(exc.code), exc.read()
-        except urllib.error.URLError:
+        except urllib.error.URLError as exc:
+            if isinstance(exc.reason, TimeoutError):
+                raise ProviderUnavailable('模型响应超时，请稍后重试', details={'reason': 'timeout'}) from None
             raise ProviderUnavailable('Model service is unreachable') from None
+        except TimeoutError:
+            # A read timeout is raised directly, not wrapped in URLError.
+            raise ProviderUnavailable('模型响应超时，请稍后重试', details={'reason': 'timeout'}) from None
+        except (http.client.HTTPException, ConnectionError):
+            raise ProviderUnavailable('模型服务连接中断，请稍后重试', details={'reason': 'connection'}) from None
 
     return transport
 

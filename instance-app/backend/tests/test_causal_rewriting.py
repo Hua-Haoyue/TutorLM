@@ -320,3 +320,66 @@ def test_original_snapshot_survives_pruned_history_and_multiple_updates(client, 
     assert {c['node_id'] for c in requests[-1].children} == {first, second}
     assert requests[-1].parent_original_text == requests[0].parent_original_text
     assert next_run['result']['explanation']['learning']['retelling']['original_explanation_id'] == original_id
+
+
+def test_a_long_parent_is_not_forced_below_its_own_length():
+    # The reported case: a root card (anchor tier, 40-65 chars) whose answer is ~230 chars
+    # with LaTeX. A local rewrite keeps the untouched sentences, so it must not fail at 78.
+    from backend.application.services.causal_rewriting import length_limit, visible_length
+    parent = (r'特征值是指对方阵 $A$ 和非零向量 $\vec{x}$，若 $A\vec{x} = \lambda\vec{x}$，则标量 $\lambda$ 称为特征值。'
+              + '在 PageRank 中它刻画转移矩阵的谱特性，决定平稳分布的存在唯一性，并控制幂迭代的收敛速度。' * 3)
+    request = RetellRequest('特征值', 'q', parent, ({'selection': '方阵'},), {}, rewrite_policy=rewrite_policy(0))
+    assert length_limit(request) >= visible_length(parent) > 78
+    rewrite = parent.replace('方阵', '**行列数相同的方阵**', 1)
+    assert not any('明显超长' in f for f in rewrite_feedback(rewrite, request))
+    # A formula counts by its rendered size, not its LaTeX source.
+    assert visible_length(r'$A\vec{x} = \lambda\vec{x}$') < len(r'A\vec{x}=\lambda\vec{x}')
+
+
+def test_repaired_draft_keeps_a_valid_body_despite_overlong_metadata(client, session_headers, project_id, text_document,
+                                                                    wait_for_run, monkeypatch):
+    parent, child = tree(client, session_headers, project_id, text_document['id'], wait_for_run)
+    requests = []
+    def rewrite(request):
+        requests.append(request)
+        data = output('通过**减少变化**保留重点。', [child], terms=('减少变化', '编造的术语'))
+        data['bridges'][0]['connection'] = '这是一句明显超过三十二个可见字符的连接说明，用来模拟模型常见的超长输出情况'
+        data['causal_payload']['causal_reason'] = '原因' * 20
+        return json.dumps(data, ensure_ascii=False)
+    monkeypatch.setattr(client.app.state.tutorlm.services.provider, 'retell', rewrite)
+    run = execute(client, session_headers, wait_for_run, 'retelling', node_id=parent)
+    assert run['state'] == 'completed', run
+    assert len(requests) == 2 and requests[1].retry_feedback, 'the first draft still gets one repair'
+    assert len(visible_text(run['result']['bridges'][0]['connection'])) == 32
+    payload = run['result']['explanation']['learning']['causal_payload']
+    assert payload['terms'] == ['减少变化'] and len(visible_text(payload['causal_reason'])) == 32
+
+
+def test_failed_repair_reports_the_reason():
+    # The error now carries why validation failed (it used to be dropped).
+    from backend.application.services import retelling_service
+    import inspect
+    assert '原因：' in inspect.getsource(retelling_service.run)
+
+
+def test_retelling_and_extraction_never_web_search_and_timeouts_are_provider_errors(monkeypatch):
+    from backend.application.services.model_options import CURRENT_OPTIONS
+    from backend.domain.errors import ProviderUnavailable
+    from backend.infrastructure.providers import openai_compatible
+    calls = []
+    provider = OpenAIProvider(SimpleNamespace(info=SimpleNamespace(name='gemini', model='gemini-2.5-flash'),
+                                             generate=lambda request: calls.append(request) or SimpleNamespace(text='{}', payload={})))
+    monkeypatch.setattr(provider, 'research', lambda *a, **k: (_ for _ in ()).throw(AssertionError('no web search')))
+    token = CURRENT_OPTIONS.set({'effort': 'auto', 'web_search': True})
+    try:
+        provider.retell(RetellRequest('t', 'q', 'a', (), {}, rewrite_policy=rewrite_policy(0)))
+        provider.extract_causal(CausalExtractionRequest(items=()))
+    finally:
+        CURRENT_OPTIONS.reset(token)
+    assert [c.kind for c in calls] == ['retelling', 'causal_extraction'] and not any(c.web_search for c in calls)
+    for error in (TimeoutError('read timed out'), ConnectionResetError('reset')):
+        def boom(*_a, **_k):
+            raise error
+        monkeypatch.setattr(openai_compatible.urllib.request, 'urlopen', boom)
+        with pytest.raises(ProviderUnavailable):
+            openai_compatible.build_transport(timeout=1)(openai_compatible.urllib.request.Request('http://x.invalid'), 1)

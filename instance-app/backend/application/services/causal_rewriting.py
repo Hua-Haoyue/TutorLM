@@ -9,8 +9,23 @@ from backend.domain.errors import ProviderError
 VERSION = 'local-retelling.v4'
 
 
+MATH = re.compile(r'\$\$[\s\S]+?\$\$|\$[^$\n]+?\$')
+
+
 def visible_text(text):
     return re.sub(r'\s+', '', text.replace('**', '').replace('__', '').replace('`', ''))
+
+
+def visible_length(text):
+    """Length a reader sees: a formula counts by its rendered size, not its LaTeX source."""
+    return len(visible_text(MATH.sub(lambda m: '式' * (1 + len(m.group()) // 4), text)))
+
+
+def length_limit(request):
+    """Hard ceiling for a rewrite. A local rewrite keeps the untouched parent text, so it
+    is never forced far below the length of the parent answer it edits."""
+    return max(request.rewrite_policy['repair_above_chars'],
+               math.ceil(visible_length(request.parent_answer) * 1.2))
 
 
 def rewrite_policy(depth):
@@ -125,25 +140,49 @@ def parse_json(raw):
     return value
 
 
-def parse_payload(value, source_text):
+def clip_visible(text, maximum):
+    """Shorten to at most `maximum` visible characters (whitespace is not counted)."""
+    out, seen = [], 0
+    for ch in text:
+        if not ch.isspace():
+            if seen == maximum:
+                break
+            seen += 1
+        out.append(ch)
+    return ''.join(out).strip()
+
+
+def parse_payload(value, source_text, *, lenient=False):
+    """Strict for a first draft (problems become repair feedback). `lenient`, for the
+    repaired draft, clips over-long metadata and drops terms not found in the source
+    instead of discarding a valid explanation because of its metadata."""
     if not isinstance(value, dict):
         raise ProviderError('Missing causal payload')
     out = {}
     for key, maximum in (('causal_bridge', 32), ('causal_reason', 32), ('analogy_core', 10)):
         text = value.get(key)
-        if not isinstance(text, str) or (key != 'analogy_core' and not text.strip()) or len(visible_text(text)) > maximum:
+        if not isinstance(text, str) or (key != 'analogy_core' and not text.strip()):
             raise ProviderError(f'Invalid {key}; maximum {maximum} characters')
+        if len(visible_text(text)) > maximum:
+            if not lenient:
+                raise ProviderError(f'Invalid {key}; maximum {maximum} characters')
+            text = clip_visible(text, maximum)
         out[key] = text.strip()
     terms = value.get('terms')
-    if not isinstance(terms, list) or len(terms) > 12 or any(
-        not isinstance(term, str) or not term.strip() or term != term.strip()
-        or len(term) > 100 or term not in source_text for term in terms
-    ) or len(set(terms)) != len(terms):
+    if not isinstance(terms, list):
+        raise ProviderError('Causal terms must be unique exact source terms')
+
+    def exact(term):
+        return (isinstance(term, str) and bool(term.strip()) and term == term.strip()
+                and len(term) <= 100 and term in source_text)
+    if lenient:
+        terms = list(dict.fromkeys(term for term in terms if exact(term)))[:12]
+    elif len(terms) > 12 or not all(exact(term) for term in terms) or len(set(terms)) != len(terms):
         raise ProviderError('Causal terms must be unique exact source terms')
     return {**out, 'terms': terms}
 
 
-def validate_rewrite(data, request):
+def validate_rewrite(data, request, *, lenient=False):
     answer = data.get('rewritten_explanation')
     if not isinstance(answer, str) or not answer.strip():
         raise ProviderError('Retelling requires one complete answer')
@@ -153,15 +192,15 @@ def validate_rewrite(data, request):
         raise ProviderError('Remove bracket annotations, HTML and code fences; write natural prose')
     if answer.count('**') % 2:
         raise ProviderError('Unclosed bold emphasis')
-    payload = parse_payload(data.get('causal_payload'), answer + '\n' + request.parent_title)
+    payload = parse_payload(data.get('causal_payload'), answer + '\n' + request.parent_title, lenient=lenient)
     return answer.strip(), payload
 
 
 def rewrite_feedback(answer, request):
     """Style and locality checks guide one repair, without brittle semantic rejection."""
     feedback = []
-    length = len(visible_text(answer))
-    if length > request.rewrite_policy['repair_above_chars']:
+    length = visible_length(answer)
+    if length > length_limit(request):
         feedback.append(f"正文 {length} characters，明显超长；目标 {request.rewrite_policy['target_chars']} 字。"
                         '只压缩重复和修饰，保留未追问的内容及必要条件。')
     if visible_text(answer) != visible_text(request.parent_answer):

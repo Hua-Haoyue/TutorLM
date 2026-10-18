@@ -7,7 +7,8 @@ from dataclasses import replace
 
 from backend.application.ports.model_provider import CausalExtractionRequest, RetellRequest
 from backend.application.services.causal_rewriting import (
-    VERSION, parse_json, parse_payload, rewrite_feedback, rewrite_policy, validate_rewrite, visible_text,
+    VERSION, clip_visible, length_limit, parse_json, parse_payload, rewrite_feedback, rewrite_policy,
+    validate_rewrite, visible_length, visible_text,
 )
 from backend.domain.errors import ConflictError, InvalidInputError, NotFoundError, ProviderError
 from backend.domain.models import Explanation
@@ -70,9 +71,9 @@ def snapshot(container, node_id: str) -> dict:
                 'direct_child_ids': [child.id for child in direct]}
 
 
-def _parse(raw: str, child_ids: list[str], request: RetellRequest) -> dict:
+def _parse(raw: str, child_ids: list[str], request: RetellRequest, *, lenient=False) -> dict:
     data = parse_json(raw)
-    answer, payload = validate_rewrite(data, request)
+    answer, payload = validate_rewrite(data, request, lenient=lenient)
     bridges = data.get('bridges')
     if not isinstance(bridges, list) or len(bridges) != len(child_ids):
         raise ProviderError('Retelling must bridge every resolved child exactly once')
@@ -82,7 +83,9 @@ def _parse(raw: str, child_ids: list[str], request: RetellRequest) -> dict:
     ):
         raise ProviderError('Retelling child bridges do not match the requested order')
     if any(len(visible_text(b['connection'])) > 32 for b in bridges):
-        raise ProviderError('Each causal bridge must be at most 32 characters')
+        if not lenient:
+            raise ProviderError('Each causal bridge must be at most 32 characters')
+        bridges = [{**b, 'connection': clip_visible(b['connection'], 32)} for b in bridges]
     return {'answer': answer, 'bridges': bridges, 'causal_payload': payload}
 
 
@@ -182,24 +185,26 @@ def run(context, node_id: str) -> Draft:
     generate = getattr(container.context.provider, 'retell', None)
     if not callable(generate):
         raise ProviderError('This model provider does not support retelling')
-    # Generate toward the requested style, then allow only one targeted repair.
+    # Generate toward the requested style, then allow only one targeted repair. The repaired
+    # draft is read leniently (over-long metadata clipped, unknown terms dropped); only a
+    # broken body or a rewrite far longer than the parent it edits still fails.
     warnings = []
     for attempt in range(2):
         context.guard()
         raw = generate(request)
         try:
-            parsed = _parse(raw, updated_ids, request)
+            parsed = _parse(raw, updated_ids, request, lenient=attempt == 1)
             warnings = rewrite_feedback(parsed['answer'], request)
             if warnings and attempt == 0:
                 request = replace(request, retry_feedback='; '.join(warnings), previous_response=raw)
                 continue
-            if len(visible_text(parsed['answer'])) > request.rewrite_policy['repair_above_chars']:
+            if visible_length(parsed['answer']) > length_limit(request):
                 raise ProviderError('; '.join(warnings))
             break
         except ProviderError as exc:
             if attempt == 1:
                 raise ProviderError(
-                    '回讲定向修正后仍未通过校验，当前解释已保留。',
+                    f'回讲定向修正后仍未通过校验，当前解释已保留。（原因：{str(exc)[:160]}）',
                     details={'validation_error': str(exc)},
                 ) from exc
             request = replace(request, retry_feedback=str(exc), previous_response=raw)
@@ -234,7 +239,7 @@ def run(context, node_id: str) -> Draft:
                                           'updated_child_ids': updated_ids,
                                           'explanation_depth': captured['depth'],
                                           'rewrite_policy': request.rewrite_policy,
-                                          'visible_chars': len(visible_text(parsed['answer'])),
+                                          'visible_chars': visible_length(parsed['answer']),
                                           'child_explanation_ids': [entries[key]['explanation']['id'] for key in ready_ids],
                                           'skipped_child_ids': blocked_ids,
                                           'bridges': parsed['bridges'], 'style_warnings': warnings}}
