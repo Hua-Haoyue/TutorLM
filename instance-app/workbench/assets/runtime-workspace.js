@@ -3550,23 +3550,6 @@
     S.docs.push(doc); await openDocument(doc.id);
     openAsk({ kind: 'visual', blob, documentId: doc.id, revisionId: doc.current_revision_id, quote: '图像：' + file.name, label: file.name }, { left: 24, top: 80, bottom: 100 });
   }));
-  // Touch scrolling over PDF text must not become an accidental browser selection.
-  let readerGesture = null;
-  scroller.addEventListener('pointerdown', (event) => {
-    if (event.pointerType !== 'touch' || S.modal) return;
-    readerGesture = { x: event.clientX, y: event.clientY, scrolling: false };
-  }, true);
-  scroller.addEventListener('pointermove', (event) => {
-    if (!readerGesture || readerGesture.scrolling) return;
-    const dx = event.clientX - readerGesture.x, dy = event.clientY - readerGesture.y;
-    if (Math.abs(dy) < 8 || Math.abs(dy) < Math.abs(dx) * 1.2) return;
-    readerGesture.scrolling = true;
-    getSelection().removeAllRanges();
-  }, true);
-  const finishReaderGesture = () => { readerGesture = null; };
-  scroller.addEventListener('pointerup', finishReaderGesture, true);
-  scroller.addEventListener('pointercancel', finishReaderGesture, true);
-  scroller.addEventListener('lostpointercapture', finishReaderGesture, true);
   $('#focus-btn').addEventListener('click', () => setFocusMode(!app.classList.contains('focus')));
   $('#find-btn').addEventListener('click', () => openPalette());
   scroller.addEventListener('scroll', () => { updateStatus(); drawConnector(); followScroll(); }, { passive: true });
