@@ -85,3 +85,33 @@ def test_terminal_run_cannot_be_resurrected(client, session_headers):
     store.mark_run_state(run['id'], 'completed', result_json='{"unexpected":true}')
     assert store.get_run(run['id'])['state'] == 'cancelled'
     assert not store.get_run(run['id'])['result_json']
+
+
+def test_remote_narration_is_long_keeps_paragraphs_and_asks_once_for_more():
+    from backend.domain.models import Node
+    from backend.host.local import provider as local
+
+    class Provider:
+        info = ProviderInfo('gemini', 'gemini-3-flash-preview')
+        texts = ['太短的串讲。', '第一段讲 **特征值** 是什么。' * 40 + '\n\n\n  第二段讲关系。  \n\n第三段总结。']
+        requests = []
+
+        def generate(self, request):
+            self.requests.append(request)
+            text = self.texts[min(len(self.requests), 2) - 1]
+            return GenerateResult(json.dumps({'segments': [{'node_id': 'node-1', 'title': '串讲', 'text': text,
+                                                            'duration_seconds': 5}]}), self.info.name, self.info.model)
+
+    provider = Provider()
+    implementation = OpenAIProvider(provider, max_tokens=2048, timeout_seconds=60)
+    root = Node(id='node-1', project_id='p', document_id='d', title='根节点串讲', kind='concept', revision=1,
+                created_at=0, updated_at=0, metadata={'global_narration': {'roots': [{'title': '特征值'}]}})
+    [text] = implementation.narrate(NarrationRequest('Narration', [root]))
+    # The first, too short draft gets exactly one retry with feedback.
+    assert len(provider.requests) == 2 and '串讲过短' in json.loads(provider.requests[1].prompt)['retry_feedback']
+    # Paragraphs survive (runs of blank lines tidied); root names are capsules.
+    assert text.count('\n\n') == 2 and '\n\n\n' not in text and '**特征值**' in text
+    first = provider.requests[0]
+    assert first.max_tokens >= local.NARRATION_MAX_TOKENS and first.timeout_seconds >= local.NARRATION_TIMEOUT_SECONDS
+    assert '宁长勿短' in first.system and '由浅入深' in first.system
+    assert '80～120' not in first.system and '不要扩写成文章' not in first.system
