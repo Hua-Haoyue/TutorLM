@@ -3553,9 +3553,8 @@
   // Touch scrolling over PDF text must not become an accidental browser selection.
   let readerGesture = null;
   scroller.addEventListener('pointerdown', (event) => {
-    if (event.pointerType === 'mouse' && event.button !== 0) return;
-    if (S.modal || event.target.closest('input, textarea, select, button, a, [contenteditable="true"]')) return;
-    readerGesture = { x: event.clientX, y: event.clientY, lastY: event.clientY, scrolling: false };
+    if (event.pointerType !== 'touch' || S.modal) return;
+    readerGesture = { x: event.clientX, y: event.clientY, scrolling: false };
   }, true);
   scroller.addEventListener('pointermove', (event) => {
     if (!readerGesture || readerGesture.scrolling) return;
@@ -3563,14 +3562,6 @@
     if (Math.abs(dy) < 8 || Math.abs(dy) < Math.abs(dx) * 1.2) return;
     readerGesture.scrolling = true;
     getSelection().removeAllRanges();
-    if (event.pointerType !== 'touch') event.preventDefault();
-    readerGesture.lastY = event.clientY;
-  }, true);
-  scroller.addEventListener('pointermove', (event) => {
-    if (!readerGesture?.scrolling || event.pointerType === 'touch') return;
-    const dy = event.clientY - readerGesture.lastY;
-    if (dy) scroller.scrollTop -= dy;
-    readerGesture.lastY = event.clientY;
   }, true);
   const finishReaderGesture = () => { readerGesture = null; };
   scroller.addEventListener('pointerup', finishReaderGesture, true);
