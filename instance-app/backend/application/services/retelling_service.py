@@ -89,6 +89,13 @@ def _parse(raw: str, child_ids: list[str], request: RetellRequest, *, lenient=Fa
     return {'answer': answer, 'bridges': bridges, 'causal_payload': payload}
 
 
+def _stable(captured):
+    """The snapshot without card presentation state (position, pages, highlights...)."""
+    from backend.application.services.workspace import generation_fingerprint
+    nodes = [(generation_fingerprint(e['node']), e['explanation']) for e in captured['nodes']]
+    return {**captured, 'nodes': nodes, 'ancestors': [generation_fingerprint(a) for a in captured['ancestors']]}
+
+
 def _fingerprint(entry):
     explanation, node = entry['explanation'], entry['node']
     source = ((node.get('metadata') or {}).get('source') or {})
@@ -211,7 +218,7 @@ def run(context, node_id: str) -> Draft:
     context.guard()
 
     def validate():
-        if snapshot(container, node_id) != captured:
+        if _stable(snapshot(container, node_id)) != _stable(captured):
             raise ConflictError('Learning tree changed during retelling; run it again')
 
     base = {'status': 'partial' if blocked_ids else 'complete', 'parent_node_id': node_id,

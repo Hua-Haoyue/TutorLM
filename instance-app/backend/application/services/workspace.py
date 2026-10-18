@@ -13,6 +13,24 @@ def epoch(value):
     return float(value) if isinstance(value, (float, int)) else datetime.fromisoformat(str(value).replace('Z', '+00:00')).timestamp()
 
 
+# What a generation reads from a node. Everything else in its metadata (card position,
+# size, layout routes, explanation pages, highlights, view toggles, mastery status) is
+# reading/presentation state the user keeps changing while a run is generating; it bumps
+# the node revision but must not invalidate the run.
+GENERATION_METADATA = ('source', 'visual_source', 'branch_type', 'explanation_depth')
+
+
+def generation_fingerprint(node):
+    """Stable view of the parts of a node (store row or dict) that generations depend on."""
+    metadata = node.get('metadata')
+    if metadata is None:
+        metadata = json.loads(node.get('metadata_json') or '{}')
+    return json.dumps([node.get('project_id'), node.get('document_id'), node.get('parent_id'),
+                       node.get('title'), str(node.get('kind')), node.get('content'),
+                       {key: metadata.get(key) for key in GENERATION_METADATA}],
+                      sort_keys=True, ensure_ascii=False, default=str)
+
+
 def node_entity(row):
     return Node(
         id=row['id'], project_id=row['project_id'], document_id=row.get('document_id'),

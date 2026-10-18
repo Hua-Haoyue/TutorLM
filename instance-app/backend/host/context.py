@@ -2,7 +2,9 @@
 import json
 from types import SimpleNamespace
 
-from backend.application.services.workspace import ExplanationService, LearningService, NodeService, ProjectService
+from backend.application.services.workspace import (
+    ExplanationService, LearningService, NodeService, ProjectService, generation_fingerprint,
+)
 from backend.domain.errors import InvalidInputError, ConflictError
 from backend.plugin_contracts.validation import bounded_json
 from backend.host.runs import CancelledRun
@@ -67,13 +69,15 @@ class ScopedContext:
         self.cancel.check()
 
     def _observe(self, node):
-        self._versions.setdefault(node['id'], (node['project_id'], node['revision']))
+        # Only what the generation read: moving, resizing, paging or highlighting a card
+        # while it generates changes its revision but not its result.
+        self._versions.setdefault(node['id'], generation_fingerprint(node))
 
     def precommit(self):
         self.guard()
         for node_id, version in self._versions.items():
             current = self._app.store.get_node(node_id)
-            if current is None or (current['project_id'], current['revision']) != version:
+            if current is None or generation_fingerprint(current) != version:
                 raise ConflictError('Plugin source changed during generation')
 
     def capability(self, name):
