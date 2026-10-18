@@ -195,6 +195,9 @@
   const accessPolicy = () => get('/control/access-policy', { auth: false });
   const listWorkspaces = () => get('/control/workspaces', { auth: false });
   const createWorkspace = (title) => post('/control/workspaces', { title }, { auth: false });
+  const renameWorkspace = (id, title) => request(`/control/workspaces/${part(id)}`, { method: 'PATCH', body: { title }, auth: false });
+  /** Deletes a closed project and its data for good (409 while it is open somewhere). */
+  const deleteWorkspace = (id) => request(`/control/workspaces/${part(id)}`, { method: 'DELETE', auth: false });
   async function ensureUser() {
     try { return await get('/control/users/me', { auth: false }); }
     catch (error) { if (error.status !== 401) throw error; }
@@ -286,7 +289,7 @@
     request,
     ApiError, TERMINAL, get, post, patch, put, del, part, bytes, run, follow, connect, enter, release, detect,
     currentLease, requestLease, waitLeaseActive, secondsLeft, loadSession, redeemShare,
-    accessPolicy, ensureUser, login, listWorkspaces, createWorkspace, createShare, revokeShare,
+    accessPolicy, ensureUser, login, listWorkspaces, createWorkspace, renameWorkspace, deleteWorkspace, createShare, revokeShare,
     get recovery() { try { return JSON.parse(sessionStorage.getItem(RECOVERY)); } catch { return null; } },
     takePendingProject: () => { const v = sessionStorage.getItem(PENDING); if (v) sessionStorage.removeItem(PENDING); return v; },
     cancel: (id) => post(`/api/runs/${part(id)}/cancel`, {}),

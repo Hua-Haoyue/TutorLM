@@ -57,6 +57,25 @@ class WorkspaceService:
                 continue
         return available
 
+    def rename(self, workspace_id: str, user_id: str, title: str):
+        return self.store.rename_workspace(workspace_id, user_id, title, self.config.workspace_idle_ttl_seconds)
+
+    def delete(self, workspace_id: str, user_id: str) -> None:
+        """Delete an owned, closed project: its share codes, then its volume.
+
+        The row leaves the list at once ('deleting'). If removing the volume fails, the
+        error is kept in last_error; with an idle TTL the storage GC retries it."""
+        workspace = self.store.begin_workspace_deletion(workspace_id, user_id, self.config.workspace_idle_ttl_seconds)
+        self.store.revoke_invitations_for_workspace(workspace_id)
+        try:
+            expected = self.config.workspace_volume_name(workspace.workspace_id)
+            if workspace.volume_name != expected:
+                raise RuntimeUnavailable('Workspace volume does not match its UUID')
+            self.adapter.remove_volume(expected)
+            self.store.finish_workspace_deletion(workspace_id)
+        except Exception as exc:
+            self.store.finish_workspace_deletion(workspace_id, error=str(exc)[:500])
+
     def gc_once(self) -> dict:
         report = {'deleted': [], 'failed': [], 'failed_copies_claimed': []}
         # Failed share copies leave a hidden, never-active destination. If the

@@ -155,6 +155,13 @@ class InvitationConflict(ControlPlaneError):
     http_status = 409
 
 
+class WorkspaceInUse(ControlPlaneError):
+    """The workspace is open (a lease or slot uses it) or being copied."""
+
+    code = "workspace_in_use"
+    http_status = 409
+
+
 class CopyInProgress(ControlPlaneError):
     """同一源项目/分享码的复制操作正在进行，不能重复启动。"""
 

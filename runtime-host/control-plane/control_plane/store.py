@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import sqlite3
 import threading
@@ -500,6 +501,22 @@ class ControlPlaneStore:
             if touch:
                 conn.execute('UPDATE workspaces SET last_used_at=? WHERE workspace_id=?', (self._clock(), workspace_id))
         return self.require_workspace(workspace_id) if touch else workspace
+
+    def rename_workspace(self, workspace_id: str, user_id: str, title: str, idle_seconds: int | None) -> Workspace:
+        with self.transaction() as conn:
+            self._owned_workspace(conn, workspace_id, user_id, idle_seconds)
+            conn.execute('UPDATE workspaces SET title=? WHERE workspace_id=?', (title, workspace_id))
+        return self.require_workspace(workspace_id)
+
+    def begin_workspace_deletion(self, workspace_id: str, user_id: str, idle_seconds: int | None) -> Workspace:
+        """Owner deletes a project now: only when nothing mounts or copies it."""
+        from control_plane.errors import WorkspaceInUse
+        with self.transaction() as conn:
+            workspace = self._owned_workspace(conn, workspace_id, user_id, idle_seconds)
+            if self._workspace_in_use(conn, workspace_id) or self._workspace_pinned(conn, workspace_id):
+                raise WorkspaceInUse('Workspace is open or being copied; close it first')
+            conn.execute("UPDATE workspaces SET state='deleting' WHERE workspace_id=?", (workspace_id,))
+        return dataclasses.replace(workspace, state='deleting')
 
     def claim_expired_workspaces(self, idle_seconds: int) -> list[Workspace]:
         claimed = []

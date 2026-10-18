@@ -138,6 +138,18 @@ def get_workspace(workspace_id: UUID, user=Depends(current_user), service=Depend
     return {'workspace': workspace.to_dict(None if service.config.workspace_permanent or service.config.workspace_idle_ttl_seconds is None else service.config.workspace_idle_ttl_seconds)}
 
 
+@router.patch('/workspaces/{workspace_id}')
+def rename_workspace(workspace_id: UUID, payload: WorkspaceCreateRequest, user=Depends(current_user), service=Depends(get_workspaces)):
+    workspace = service.rename(str(workspace_id), user['user_id'], payload.title.strip())
+    return {'workspace': workspace.to_dict(None if service.config.workspace_permanent or service.config.workspace_idle_ttl_seconds is None else service.config.workspace_idle_ttl_seconds)}
+
+
+@router.delete('/workspaces/{workspace_id}', status_code=204)
+def delete_workspace(workspace_id: UUID, user=Depends(current_user), service=Depends(get_workspaces)):
+    service.delete(str(workspace_id), user['user_id'])
+    return Response(status_code=204)
+
+
 @router.post('/workspaces/{workspace_id}/touch')
 def touch_workspace(workspace_id: UUID, user=Depends(current_user), service=Depends(get_workspaces)):
     workspace = service.get(str(workspace_id), user['user_id'], touch=True)

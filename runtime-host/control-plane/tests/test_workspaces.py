@@ -440,3 +440,53 @@ def test_switching_user_identity_drops_the_previous_project_lease(system):
     assert state.adapter.volume_exists(state.store.require_workspace(workspace['workspace_id']).volume_name)
     assert login(client, original).status_code == 200
     assert client.get('/control/workspaces').json()['items'][0]['workspace_id'] == workspace['workspace_id']
+
+
+def test_owner_renames_and_deletes_a_closed_project_with_its_volume(system):
+    client, state, _ = system
+    register(client)
+    keep, gone = create(client, 'Keep'), create(client, 'Old name')
+    renamed = client.patch(f"/control/workspaces/{gone['workspace_id']}", json={'title': '  New name  '})
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()['workspace']['title'] == 'New name'
+    assert client.patch(f"/control/workspaces/{gone['workspace_id']}", json={'title': '   '}).status_code == 422
+    # A project that is open (has compute) cannot be deleted.
+    assert open_workspace(client, gone).status_code in (200, 201)
+    volume = state.store.require_workspace(gone['workspace_id']).volume_name
+    busy = client.delete(f"/control/workspaces/{gone['workspace_id']}")
+    assert busy.status_code == 409 and busy.json()['error']['code'] == 'workspace_in_use'
+    assert client.delete('/control/leases/current').status_code == 202
+    assert client.delete(f"/control/workspaces/{gone['workspace_id']}").status_code == 204
+    assert not state.adapter.volume_exists(volume)
+    assert state.store.require_workspace(gone['workspace_id']).state == 'deleted'
+    assert [w['workspace_id'] for w in client.get('/control/workspaces').json()['items']] == [keep['workspace_id']]
+    assert client.get(f"/control/workspaces/{gone['workspace_id']}").status_code in (404, 410)
+    assert client.patch(f"/control/workspaces/{gone['workspace_id']}", json={'title': 'x'}).status_code in (404, 410)
+    assert client.delete(f"/control/workspaces/{gone['workspace_id']}").status_code in (404, 410)
+
+
+def test_other_users_cannot_rename_or_delete_a_project(system):
+    client, state, _ = system
+    register(client)
+    workspace = create(client, 'Mine')
+    other = TestClient(client.app)
+    try:
+        register(other)
+        assert other.patch(f"/control/workspaces/{workspace['workspace_id']}", json={'title': 'Stolen'}).status_code == 404
+        assert other.delete(f"/control/workspaces/{workspace['workspace_id']}").status_code == 404
+    finally:
+        other.close()
+    assert state.store.require_workspace(workspace['workspace_id']).title == 'Mine'
+    assert state.store.require_workspace(workspace['workspace_id']).state == 'active'
+
+
+def test_volume_removal_failure_still_hides_the_project_and_records_the_error(system):
+    client, state, _ = system
+    register(client)
+    workspace = create(client, 'Sticky')
+    volume = state.store.require_workspace(workspace['workspace_id']).volume_name
+    state.adapter.fail_remove_volume.add(volume)
+    assert client.delete(f"/control/workspaces/{workspace['workspace_id']}").status_code == 204
+    stored = state.store.require_workspace(workspace['workspace_id'])
+    assert stored.state == 'deleting' and volume in (stored.last_error or '')
+    assert client.get('/control/workspaces').json()['items'] == []

@@ -3103,6 +3103,57 @@
     const item = e.target.closest('[data-project]');
     if (item) { closeMenus(); if (item.dataset.project !== S.project.id) await switchProject(item.dataset.project); }
   }));
+  /* Right-click (or the context-menu key) on a project in the workspace list: rename or
+     delete it. The open project cannot be deleted here (清空当前工作区 empties it). */
+  let wsCtx = null;
+  const hideWsCtx = () => { wsCtx?.remove(); wsCtx = null; };
+  $('#ws-menu').addEventListener('contextmenu', (e) => {
+    const item = e.target.closest('[data-workspace], [data-project]');
+    if (!item) return;
+    e.preventDefault(); hideWsCtx();
+    const managed = !!item.dataset.workspace, id = item.dataset.workspace || item.dataset.project;
+    const current = managed ? id === api.lease?.workspace_id : id === S.project?.id;
+    const title = item.textContent.trim();
+    wsCtx = document.createElement('div');
+    wsCtx.className = 'menu ctx-menu'; wsCtx.setAttribute('role', 'menu'); wsCtx.setAttribute('aria-label', '工作区「' + title + '」');
+    wsCtx.innerHTML = `<button class="menu__item" role="menuitem" data-wk="rename">重命名…</button>${managed
+      ? `<button class="menu__item" role="menuitem" data-wk="delete" ${current ? 'disabled title="这是当前打开的工作区：请先切换到其他工作区再删除，或使用「清空当前工作区」"' : ''}>删除工作区…</button>` : ''}`;
+    document.body.appendChild(wsCtx);
+    const box = e.clientX || e.clientY ? { left: e.clientX, top: e.clientY } : item.getBoundingClientRect();
+    wsCtx.style.left = Math.min(box.left, innerWidth - wsCtx.offsetWidth - 8) + 'px';
+    wsCtx.style.top = Math.min(box.top, innerHeight - wsCtx.offsetHeight - 8) + 'px';
+    wsCtx.addEventListener('keydown', (k) => { if (k.key === 'Escape') { hideWsCtx(); $('#ws-btn')?.focus(); } });
+    wsCtx.addEventListener('click', action(async (c) => {
+      const k = c.target.closest('[data-wk]')?.dataset.wk;
+      if (!k) return;
+      hideWsCtx(); closeMenus();
+      if (k === 'rename') await renameWorkspaceItem(managed, id, title, current);
+      if (k === 'delete' && managed && !current) await deleteWorkspaceItem(id, title);
+    }));
+    $('.menu__item:not(:disabled)', wsCtx)?.focus();
+  });
+  document.addEventListener('mousedown', (e) => { if (wsCtx && !wsCtx.contains(e.target)) hideWsCtx(); });
+  async function renameWorkspaceItem(managed, id, title, current) {
+    const next = (await promptModal('重命名工作区', '名称', title, 200))?.trim();
+    if (!next || next === title) return;
+    if (managed) await sync(api.renameWorkspace(id, next));
+    // The open project also carries its title inside the instance (header, exports).
+    if (current || !managed) {
+      const updated = await sync(api.patch(`/api/projects/${p(current ? S.project.id : id)}`, { title: next }));
+      if (current) { Object.assign(S.project, updated); $('#ws-name').textContent = S.project.title; }
+      else Object.assign(S.projects.find((x) => x.id === id) || {}, updated);
+    }
+    toast('已重命名为「' + clip(next, 24) + '」');
+  }
+  async function deleteWorkspaceItem(id, title) {
+    if (!(await confirmModal('删除工作区', `「${esc(title)}」中的全部文档、节点、解释、串讲和分享码会被永久删除，无法恢复。`, '删除'))) return;
+    try { await sync(api.deleteWorkspace(id)); }
+    catch (error) {
+      if (error.status === 409) { toast('这个工作区正在其他页面中打开，关闭后再删除'); return; }
+      throw error;
+    }
+    toast('已删除工作区「' + clip(title, 24) + '」');
+  }
   async function paintUsage() {
     const runs = (await api.get('/api/runs')).items || [];
     const cap = api.limits?.max_runs_per_session;
