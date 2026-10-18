@@ -802,6 +802,11 @@
     const range = sel.getRangeAt(0);
     const startB = blockOf(range.startContainer);
     if (!startB || !sheet.contains(startB)) return null;
+    const tableSelection = TLMTableSelection.selection(range, sheet, S.text);
+    if (tableSelection) return { origin: { kind: 'doc', block: Number(startB.dataset.b),
+      ...tableSelection, ...(S.textFile ? { sourceFile: S.textFile } : {}),
+      documentId: S.doc.id, revisionId: S.doc.current_revision_id, label: sectionOf(Number(startB.dataset.b)) },
+      rect: range.getBoundingClientRect() };
     let r = range;
     if (blockOf(range.endContainer) !== startB) { r = range.cloneRange(); r.setEnd(startB, startB.childNodes.length); }
     const mathSelection = TutorMathSelection.selection(r, startB, S.text);
@@ -1853,7 +1858,7 @@
     const initialPosition = placeNew(parent);
     const node = await sync(api.post(`${projectPath()}/nodes`, {
       document_id, title: initialNodeTitle(origin.quote), kind: 'concept',
-      content: origin.quote.slice(0, 20000), parent_id: parent?.id || null,
+      content: (origin.tableContext || origin.quote).slice(0, 20000), parent_id: parent?.id || null,
       metadata: { source, branch_type: origin.branchType || 'auto', ...(visualSource ? { visual_source: visualSource } : {}),
         status: 'learning', position: initialPosition, layout_default: { ...initialPosition, scale: 1 }, pages: [] },
     }));
