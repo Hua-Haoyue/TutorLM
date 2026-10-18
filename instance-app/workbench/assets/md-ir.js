@@ -1,5 +1,5 @@
 /* TutorLM workbench · in-place (IR) editing for the md/txt reader, Typora style.
-   A click on a rendered block reveals that block's Markdown source in place; the
+   An explicit edit button reveals a block's Markdown source in place; the
    rest of the document stays rendered. Leaving the block re-renders it. Text that
    is anchored to an explanation node is protected: any edit that would touch it
    is reverted and reported through `notify`.
@@ -69,6 +69,38 @@
    */
   function create(opts) {
     let active = null;
+    let editTarget = null;
+    const editButton = document.createElement('button');
+    editButton.type = 'button';
+    editButton.className = 'icon-btn';
+    editButton.title = '编辑这一段';
+    editButton.setAttribute('aria-label', '编辑这一段');
+    editButton.innerHTML = '<svg class="ic" aria-hidden="true"><use href="#i-code"/></svg>';
+    editButton.style.cssText = 'position:fixed;z-index:45;width:28px;height:28px;background:var(--paper);border:1px solid var(--line);';
+    editButton.hidden = true;
+    document.body.appendChild(editButton);
+    const hideEdit = () => { editButton.hidden = true; editTarget = null; };
+    const offerEdit = target => {
+      const block = editableBlock(target);
+      if (!opts.enabled() || !block || block.matches('td, th') || active) return;
+      editTarget = block;
+      const box = block.getBoundingClientRect();
+      editButton.style.left = Math.max(0, Math.min(window.innerWidth - 32, box.right - 28)) + 'px';
+      editButton.style.top = Math.max(0, box.top) + 'px';
+      editButton.hidden = false;
+    };
+    editButton.addEventListener('mousedown', event => event.preventDefault());
+    editButton.addEventListener('click', () => {
+      const block = editTarget;
+      hideEdit();
+      if (block?.isConnected && opts.enabled()) begin(block, 0, 0, 'start');
+    });
+    opts.sheet.addEventListener('mouseover', event => offerEdit(event.target));
+    document.addEventListener('scroll', hideEdit, true);
+    window.addEventListener('resize', hideEdit);
+    document.addEventListener('mousedown', event => {
+      if (!opts.sheet.contains(event.target) && !editButton.contains(event.target)) hideEdit();
+    });
 
     function editableBlock(target) {
       const block = target?.closest?.('[data-b][data-start][data-end]');
@@ -255,6 +287,9 @@
     function finish() {
       const a = active;
       if (!a) return;
+      const scroll = [];
+      for (let parent = opts.sheet.parentElement; parent; parent = parent.parentElement)
+        if (parent.scrollHeight > parent.clientHeight) scroll.push([parent, parent.scrollTop]);
       active = null;
       a.ta.removeEventListener('input', onInput);
       if (a.insert) {
@@ -265,29 +300,10 @@
       }
       opts.commit({ start: a.start, end: a.end, text: a.last, cancelled: a.last === a.original,
         ranges: a.ranges.map((r) => ({ ...r, start: r.start + a.start, end: r.end + a.start })) });
+      for (const [parent, top] of scroll) parent.scrollTop = top;
     }
 
-    /* Moving from the edited block straight to another one: leave (re-render) first,
-       then open the block now under the pointer, so one click is enough. */
-    opts.sheet.addEventListener('mousedown', (e) => {
-      if (!active || e.button !== 0 || active.block.contains(e.target) || !opts.enabled()) return;
-      if (e.target.closest('mark.anchor, a, input, button') || !editableBlock(e.target)) return;
-      e.preventDefault();
-      // Re-rendering can move blocks (the edit box and the rendered block differ in
-      // height, or the edit added text), so find the target again by its source
-      // position and keep the pointer's position relative to it.
-      const target = editableBlock(e.target), box = target.getBoundingClientRect();
-      if (target.matches('td, th')) { finish(); return; }
-      const rel = { x: e.clientX - box.left, y: e.clientY - box.top };
-      const oldStart = Number(target.dataset.start), a = active;
-      const delta = a.last.length - a.original.length, start = oldStart >= a.end ? oldStart + delta : oldStart;
-      finish();
-      const block = opts.sheet.querySelector(`[data-b][data-start="${start}"]`);
-      if (!block) return;
-      const next = block.getBoundingClientRect();
-      begin(block, next.left + Math.min(rel.x, next.width - 1), next.top + Math.min(rel.y, next.height - 1));
-    }, true);
-    /* A plain click (no text selected) on a block starts editing it. */
+    /* Reading gestures never replace rendered content with an editor. */
     opts.sheet.addEventListener('click', (e) => {
       const edit = e.target.closest('[data-ir-edit-table]');
       if (edit && opts.enabled()) {
@@ -300,7 +316,7 @@
       if (e.target.closest('mark.anchor, a, input, button, textarea, .ir-edit, [data-math-source]')) return;
       const block = editableBlock(e.target);
       if (block?.matches('td, th')) return;
-      if (block) begin(block, e.clientX, e.clientY);
+      if (block) offerEdit(block);
     });
 
     return { begin, finish, get active() { return !!active; } };
