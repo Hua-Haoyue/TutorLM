@@ -310,7 +310,7 @@ node --test instance-app/workbench/scripts/test-access.cjs instance-app/workbenc
 
 ## 🎬 路演演示
 
-<video src="https://github.com/user-attachments/assets/b56c4b39-8312-4962-95c2-d1e1fc0f42ea"
+https://github.com/user-attachments/assets/b56c4b39-8312-4962-95c2-d1e1fc0f42ea
 
 ## 📄 许可证
 
