@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <a href="http://stellaron.link:47823/">在线工作台</a> · <a href="#-快速开始">快速开始</a> · <a href="#-功能">功能</a> · <a href="#-多格式阅读">文档格式</a> · <a href="#-接入真实模型">模型接入</a> · <a href="#-测试与质量检查">开发测试</a> · <a href="#-文档入口">文档入口</a>
+  <a href="http://stellaron.link:47823/">在线工作台</a> · <a href="#-快速开始">快速开始</a> · <a href="#-功能">功能</a> · <a href="#-多格式阅读">文档格式</a> · <a href="#-接入真实模型">模型接入</a> · <a href="#-测试与质量检查">开发测试</a> · <a href="#-文档入口">文档入口</a>· <a href="#-路演演示">路演演示</a>
 </p>
 
 ## 🗞️ 最近更新
@@ -297,6 +297,10 @@ node --test instance-app/workbench/scripts/test-access.cjs instance-app/workbenc
 | 主题 | 文档 |
 | --- | --- |
 | 已实现能力与当前限制 | [docs/feature-status.md](docs/feature-status.md) |
+
+https://github.com/user-attachments/assets/b56c4b39-8312-4962-95c2-d1e1fc0f42ea
+
+
 | 工作台启动与浏览器测试 | [instance-app/workbench/README.md](instance-app/workbench/README.md) |
 | 架构与责任边界 | [docs/architecture.md](docs/architecture.md) |
 | 技术栈与第三方资源 | [docs/technical-resources.md](docs/technical-resources.md) |
@@ -307,6 +311,10 @@ node --test instance-app/workbench/scripts/test-access.cjs instance-app/workbenc
 | 控制面配置与 CLI | [docs/configuration.md](docs/configuration.md)、[docs/cli.md](docs/cli.md) |
 | 多人协作流程 | [docs/development.md](docs/development.md) |
 | 运行契约 | [contracts/README.md](contracts/README.md) |
+
+## 🎬 路演演示
+
+<video src="https://github.com/user-attachments/assets/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" controls width="860"></video>
 
 ## 📄 许可证
 
