@@ -297,10 +297,6 @@ node --test instance-app/workbench/scripts/test-access.cjs instance-app/workbenc
 | 主题 | 文档 |
 | --- | --- |
 | 已实现能力与当前限制 | [docs/feature-status.md](docs/feature-status.md) |
-
-https://github.com/user-attachments/assets/b56c4b39-8312-4962-95c2-d1e1fc0f42ea
-
-
 | 工作台启动与浏览器测试 | [instance-app/workbench/README.md](instance-app/workbench/README.md) |
 | 架构与责任边界 | [docs/architecture.md](docs/architecture.md) |
 | 技术栈与第三方资源 | [docs/technical-resources.md](docs/technical-resources.md) |
@@ -314,7 +310,7 @@ https://github.com/user-attachments/assets/b56c4b39-8312-4962-95c2-d1e1fc0f42ea
 
 ## 🎬 路演演示
 
-<video src="https://github.com/user-attachments/assets/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" controls width="860"></video>
+<video src="https://github.com/user-attachments/assets/b56c4b39-8312-4962-95c2-d1e1fc0f42ea" controls width="860"></video>
 
 ## 📄 许可证
 
